@@ -74,14 +74,11 @@ namespace DNAPuzzle
         public bool isTerminalActive { get; private set; } = true;
         private CameraStationController labStationController;
         private Camera dedicatedTerminalCamera;
+        private GameObject puzzleRoot;
         private ScreenStation monitorStation;
         private ScreenStation tabletStation;
         private ScreenStation chamberStation;
-        private GameObject monitorHoloObj;
-        private GameObject tabletHoloObj;
         private GameObject labChamberCreature;
-        private TextMesh monitorHoloActionText;
-        private Transform monitorHelixParent;
         #endregion
 
         private void Awake()
@@ -102,7 +99,7 @@ namespace DNAPuzzle
             labStationController = stationCtrl;
             isTerminalActive = false;
 
-            // 3D Puzzle sistemini Lab odasının 120 birim altına taşı (çakışma ve karmaşayı sıfırla)
+            // 3D Puzzle sistemini Lab odasının 120 birim altına taşı
             transform.position = new Vector3(0f, -120f, 0f);
 
             // Lab odasındaki ekran istasyonlarını tespit et
@@ -126,8 +123,6 @@ namespace DNAPuzzle
                 monitorStation.onEnter.AddListener(OnTerminalEnter);
                 monitorStation.onExit.RemoveListener(OnTerminalExit);
                 monitorStation.onExit.AddListener(OnTerminalExit);
-
-                BuildMonitorHoloOverlay(monitorStation);
             }
 
             if (tabletStation != null)
@@ -136,97 +131,13 @@ namespace DNAPuzzle
                 tabletStation.onEnter.AddListener(OnTerminalEnter);
                 tabletStation.onExit.RemoveListener(OnTerminalExit);
                 tabletStation.onExit.AddListener(OnTerminalExit);
-
-                BuildTabletHoloOverlay(tabletStation);
             }
 
             EnsurePuzzleInitialized();
 
-            // Başlangıçta terminal kamerasını kapalı tut (oyuncu odayı görsün)
-            if (dedicatedTerminalCamera != null)
-            {
-                dedicatedTerminalCamera.gameObject.SetActive(false);
-            }
-        }
-
-        private void BuildMonitorHoloOverlay(ScreenStation station)
-        {
-            if (monitorHoloObj != null) Destroy(monitorHoloObj);
-
-            monitorHoloObj = new GameObject("MonitorHoloPrompt");
-            monitorHoloObj.transform.SetParent(station.transform, false);
-            // FirstScreen pozisyonu (0.223, 3.24, -0.921). Ekrana doğru hafif öne ve yukarı al:
-            monitorHoloObj.transform.localPosition = new Vector3(-0.35f, 0.35f, -0.18f);
-
-            // 1. Holografik Yarı Saydam Zemin (Backplate Quad)
-            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.name = "HoloBackplate";
-            quad.transform.SetParent(monitorHoloObj.transform, false);
-            quad.transform.localScale = new Vector3(2.2f, 1.2f, 1f);
-            var col = quad.GetComponent<Collider>();
-            if (col != null) Destroy(col); // Tıklamayı FirstScreen box collider'ına bırak
-            var ren = quad.GetComponent<Renderer>();
-            ren.material = CreateHoloMaterial(new Color(0.02f, 0.12f, 0.25f, 0.78f), true);
-
-            // 2. Holografik Dönen Mini 3D DNA Sarmalı
-            var helixGo = new GameObject("MiniDNAHelix");
-            helixGo.transform.SetParent(monitorHoloObj.transform, false);
-            helixGo.transform.localPosition = new Vector3(0.75f, 0f, -0.05f);
-            monitorHelixParent = helixGo.transform;
-
-            Color[] nucColors = new Color[] {
-                new Color(0.15f, 0.85f, 1f),
-                new Color(0.95f, 0.25f, 0.5f),
-                new Color(0.2f, 1f, 0.4f),
-                new Color(1f, 0.8f, 0.1f)
-            };
-
-            for (int i = 0; i < 6; i++)
-            {
-                float t = i / 5f;
-                float angle = t * Mathf.PI * 2f;
-                float y = (t - 0.5f) * 0.7f;
-                float r = 0.22f;
-
-                var s1 = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                s1.transform.SetParent(monitorHelixParent, false);
-                s1.transform.localPosition = new Vector3(Mathf.Cos(angle) * r, y, Mathf.Sin(angle) * r);
-                s1.transform.localScale = Vector3.one * 0.08f;
-                if (s1.GetComponent<Collider>()) Destroy(s1.GetComponent<Collider>());
-                s1.GetComponent<Renderer>().material = CreateHoloMaterial(nucColors[i % 4], false);
-
-                var s2 = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                s2.transform.SetParent(monitorHelixParent, false);
-                s2.transform.localPosition = new Vector3(Mathf.Cos(angle + Mathf.PI) * r, y, Mathf.Sin(angle + Mathf.PI) * r);
-                s2.transform.localScale = Vector3.one * 0.08f;
-                if (s2.GetComponent<Collider>()) Destroy(s2.GetComponent<Collider>());
-                s2.GetComponent<Renderer>().material = CreateHoloMaterial(nucColors[(i + 2) % 4], false);
-            }
-
-            // 3. 3D Metinler (TextMesh)
-            CreateTextMeshOn(monitorHoloObj.transform, "TitleText", "🧬 GENOM TERMİNALİ", new Vector3(-0.25f, 0.32f, -0.06f), 0.032f, 96, new Color(0.1f, 0.95f, 1f));
-            monitorHoloActionText = CreateTextMeshOn(monitorHoloObj.transform, "ActionText", "[ SOL TIKLA: DNA DÜZENLEYİCİ ]", new Vector3(-0.25f, 0.02f, -0.06f), 0.024f, 84, new Color(0.25f, 1f, 0.5f));
-            CreateTextMeshOn(monitorHoloObj.transform, "StatusText", "DURUM: ÇEVRİMİÇİ • 3 GEZEGEN HAZIR", new Vector3(-0.25f, -0.28f, -0.06f), 0.018f, 72, new Color(0.75f, 0.88f, 1f, 0.85f));
-        }
-
-        private void BuildTabletHoloOverlay(ScreenStation station)
-        {
-            if (tabletHoloObj != null) Destroy(tabletHoloObj);
-
-            tabletHoloObj = new GameObject("TabletHoloPrompt");
-            tabletHoloObj.transform.SetParent(station.transform, false);
-            tabletHoloObj.transform.localPosition = new Vector3(0f, 0.6f, 0f);
-
-            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.name = "HoloBackplate";
-            quad.transform.SetParent(tabletHoloObj.transform, false);
-            quad.transform.localScale = new Vector3(1.4f, 0.7f, 1f);
-            var col = quad.GetComponent<Collider>();
-            if (col != null) Destroy(col);
-            quad.GetComponent<Renderer>().material = CreateHoloMaterial(new Color(0.04f, 0.15f, 0.3f, 0.8f), true);
-
-            CreateTextMeshOn(tabletHoloObj.transform, "TitleText", "🧬 DNA TABLETİ", new Vector3(0f, 0.16f, -0.04f), 0.028f, 88, new Color(0.2f, 0.95f, 1f));
-            CreateTextMeshOn(tabletHoloObj.transform, "ActionText", "[ TIKLA: AÇ ]", new Vector3(0f, -0.12f, -0.04f), 0.022f, 76, new Color(0.3f, 1f, 0.6f));
+            // Başlangıçta tüm puzzle geometrisini ve kamerasını kapalı tut (oda tamamen orijinal ve temiz kalsın!)
+            if (puzzleRoot != null) puzzleRoot.SetActive(false);
+            if (dedicatedTerminalCamera != null) dedicatedTerminalCamera.gameObject.SetActive(false);
         }
 
         private Material CreateHoloMaterial(Color col, bool transparent = true)
@@ -263,41 +174,6 @@ namespace DNAPuzzle
         {
             if (!isLabMode) return;
 
-            // Kamera odadayken holoları kameraya döndür ve süzdür
-            Camera roomCam = Camera.main;
-            if (roomCam != null)
-            {
-                if (monitorHoloObj != null)
-                {
-                    Vector3 toCam = roomCam.transform.position - monitorHoloObj.transform.position;
-                    if (toCam.sqrMagnitude > 0.01f)
-                    {
-                        monitorHoloObj.transform.rotation = Quaternion.LookRotation(-toCam.normalized, Vector3.up);
-                    }
-
-                    // Hover durumuna göre aksiyon metnini parlat ve nabız gibi attır
-                    float pulse = Mathf.Sin(Time.time * 4f);
-                    if (monitorHoloActionText != null)
-                    {
-                        monitorHoloActionText.color = Color.Lerp(new Color(0.2f, 1f, 0.5f), new Color(1f, 0.9f, 0.2f), (pulse + 1f) * 0.5f);
-                    }
-                }
-
-                if (tabletHoloObj != null)
-                {
-                    Vector3 toCam = roomCam.transform.position - tabletHoloObj.transform.position;
-                    if (toCam.sqrMagnitude > 0.01f)
-                    {
-                        tabletHoloObj.transform.rotation = Quaternion.LookRotation(-toCam.normalized, Vector3.up);
-                    }
-                }
-            }
-
-            if (monitorHelixParent != null)
-            {
-                monitorHelixParent.Rotate(0f, 65f * Time.deltaTime, 0f, Space.Self);
-            }
-
             // Kuluçka odasındaki canlıyı yavaşça yüzdür
             if (labChamberCreature != null)
             {
@@ -312,10 +188,8 @@ namespace DNAPuzzle
         {
             if (!isLabMode) return;
             isTerminalActive = true;
-            if (dedicatedTerminalCamera != null)
-            {
-                dedicatedTerminalCamera.gameObject.SetActive(true);
-            }
+            if (puzzleRoot != null) puzzleRoot.SetActive(true);
+            if (dedicatedTerminalCamera != null) dedicatedTerminalCamera.gameObject.SetActive(true);
             audioManager?.PlayResonance();
             audioManager?.PlaySnap();
         }
@@ -328,10 +202,8 @@ namespace DNAPuzzle
                 ExitRepairZoomMode();
             }
             isTerminalActive = false;
-            if (dedicatedTerminalCamera != null)
-            {
-                dedicatedTerminalCamera.gameObject.SetActive(false);
-            }
+            if (puzzleRoot != null) puzzleRoot.SetActive(false);
+            if (dedicatedTerminalCamera != null) dedicatedTerminalCamera.gameObject.SetActive(false);
         }
 
         public void ReturnToLabRoom()
@@ -479,6 +351,10 @@ namespace DNAPuzzle
                 Destroy(transform.GetChild(i).gameObject);
             }
 
+            puzzleRoot = new GameObject("PuzzleRoot");
+            puzzleRoot.transform.SetParent(transform, false);
+            puzzleRoot.transform.localPosition = Vector3.zero;
+
             planets = DNAPuzzleSampleData.CreateSamplePlanets();
 
             manager = GetComponent<DNAPuzzleManager>();
@@ -501,7 +377,7 @@ namespace DNAPuzzle
             SpawnHolographicCreature();
 
             var dropObj = new GameObject("PlanetaryDropCinematic");
-            dropObj.transform.SetParent(transform, false);
+            dropObj.transform.SetParent(puzzleRoot.transform, false);
             dropCinematic = dropObj.AddComponent<PlanetaryDropCinematic>();
             dropCinematic.Initialize(puzzleCamera, labScreen, audioManager);
             dropCinematic.OnCinematicFinished += () =>
@@ -515,6 +391,13 @@ namespace DNAPuzzle
 
             manager.SetGenePool(DNAPuzzleSampleData.CreateSampleGenes());
             LoadPlanet(Mathf.Clamp(currentPlanetIdx, 0, planets.Count - 1));
+
+            // Lab sahnesindeyken başlangıçta tüm puzzle geometrisini gizli tut (oda tertemiz kalsın)
+            if (isLabMode && !isTerminalActive)
+            {
+                if (puzzleRoot != null) puzzleRoot.SetActive(false);
+                if (dedicatedTerminalCamera != null) dedicatedTerminalCamera.gameObject.SetActive(false);
+            }
         }
 
         private void OnSimulatorPhaseUpdate(SimulationPhase phase, string msg, bool ok)
@@ -572,9 +455,11 @@ namespace DNAPuzzle
                     dedicatedTerminalCamera.gameObject.SetActive(false);
                 }
 
+                Transform pRoot = puzzleRoot != null ? puzzleRoot.transform : transform;
+
                 // Lab sahnesinde odanın genel ışığını bozmamak için puzzle'a özel yerel point ışıklar oluştur
                 var localKeyLightGo = new GameObject("TerminalLocalKeyLight");
-                localKeyLightGo.transform.SetParent(transform, false);
+                localKeyLightGo.transform.SetParent(pRoot, false);
                 var localKey = localKeyLightGo.AddComponent<Light>();
                 localKey.type = LightType.Point;
                 localKey.transform.localPosition = new Vector3(0f, 5f, -8f);
@@ -583,7 +468,7 @@ namespace DNAPuzzle
                 localKey.color = new Color(0.92f, 0.96f, 1f);
 
                 var rimLightGo = new GameObject("CyanRimLight");
-                rimLightGo.transform.SetParent(transform, false);
+                rimLightGo.transform.SetParent(pRoot, false);
                 var rimLight = rimLightGo.AddComponent<Light>();
                 rimLight.type = LightType.Point;
                 rimLight.transform.localPosition = new Vector3(-8f, 4f, -4f);
@@ -592,7 +477,7 @@ namespace DNAPuzzle
                 rimLight.intensity = 2.2f;
 
                 var warmLightGo = new GameObject("PlasmaRimLight");
-                warmLightGo.transform.SetParent(transform, false);
+                warmLightGo.transform.SetParent(pRoot, false);
                 var warmLight = warmLightGo.AddComponent<Light>();
                 warmLight.type = LightType.Point;
                 warmLight.range = 25f;
@@ -661,9 +546,10 @@ namespace DNAPuzzle
         {
             if (backgroundChamber != null) return;
 
+            Transform pRoot = puzzleRoot != null ? puzzleRoot.transform : transform;
             backgroundChamber = new GameObject("SciFiBioChamberBackdrop");
-            backgroundChamber.transform.SetParent(transform, false);
-            backgroundChamber.transform.position = Vector3.zero;
+            backgroundChamber.transform.SetParent(pRoot, false);
+            backgroundChamber.transform.localPosition = Vector3.zero;
 
             Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
             if (litShader == null) litShader = Shader.Find("Standard");
@@ -702,9 +588,10 @@ namespace DNAPuzzle
 
         private void SpawnHolographicCreature()
         {
+            Transform pRoot = puzzleRoot != null ? puzzleRoot.transform : transform;
             GameObject eggObj = new GameObject("AnimatedCreatureEgg");
-            eggObj.transform.SetParent(transform, false);
-            eggObj.transform.position = new Vector3(-7.85f, 1.45f, 0f);
+            eggObj.transform.SetParent(pRoot, false);
+            eggObj.transform.localPosition = new Vector3(-7.85f, 1.45f, 0f);
             eggObj.transform.localScale = Vector3.one * 0.95f;
             creatureEgg = eggObj.AddComponent<AnimatedCreatureEgg>();
         }
@@ -748,6 +635,7 @@ namespace DNAPuzzle
             foreach (var b in resonanceBeams) if (b != null) Destroy(b.gameObject);
             resonanceBeams.Clear();
 
+            Transform pRoot = puzzleRoot != null ? puzzleRoot.transform : transform;
             float spacingX = (slotCount >= 5) ? 2.85f : 2.95f;
             float totalWidth = (slotCount - 1) * spacingX;
             float startX = 1.35f - (totalWidth * 0.5f);
@@ -755,15 +643,15 @@ namespace DNAPuzzle
 
             if (helixRibbon != null) Destroy(helixRibbon.gameObject);
             GameObject ribbonObj = new GameObject("DNAHelixStrandRibbon");
-            ribbonObj.transform.SetParent(transform, false);
+            ribbonObj.transform.SetParent(pRoot, false);
             helixRibbon = ribbonObj.AddComponent<DNAHelixStrandRibbon>();
             helixRibbon.Initialize(slotCount, startX, spacingX, slotY);
 
             for (int i = 0; i < slotCount; i++)
             {
                 GameObject slotObj = new GameObject($"GenomeSlot_{i}");
-                slotObj.transform.SetParent(transform, false);
-                slotObj.transform.position = new Vector3(startX + i * spacingX, slotY, 0f);
+                slotObj.transform.SetParent(pRoot, false);
+                slotObj.transform.localPosition = new Vector3(startX + i * spacingX, slotY, 0f);
                 slotObj.transform.localScale = Vector3.one * 0.95f;
 
                 var slot = slotObj.AddComponent<AnimatedSlot>();
@@ -775,7 +663,7 @@ namespace DNAPuzzle
                 if (i > 0)
                 {
                     GameObject beamObj = new GameObject($"ResonanceBeam_{i - 1}_{i}");
-                    beamObj.transform.SetParent(transform, false);
+                    beamObj.transform.SetParent(pRoot, false);
                     var beam = beamObj.AddComponent<AnimatedResonanceBeam>();
                     beam.SetTargets(activeSlots[i - 1].transform, slot.transform);
                     resonanceBeams.Add(beam);
@@ -792,6 +680,7 @@ namespace DNAPuzzle
             var brokenGenes = DNAPuzzleSampleData.CreateBrokenGenomesForPlanet(planet);
             manager.SetGenePool(brokenGenes);
 
+            Transform pRoot = puzzleRoot != null ? puzzleRoot.transform : transform;
             int count = brokenGenes.Count;
             float spacingX = 2.95f;
             float startX = 1.35f - ((count - 1) * spacingX * 0.5f);
@@ -800,15 +689,16 @@ namespace DNAPuzzle
             for (int i = 0; i < count; i++)
             {
                 GameObject pieceObj = new GameObject($"GenomePiece_{i}_{brokenGenes[i].geneName}");
-                pieceObj.transform.SetParent(transform, false);
-                Vector3 targetPos = new Vector3(startX + i * spacingX, benchY, 0f);
-                pieceObj.transform.position = targetPos + Vector3.down * 2.5f;
+                pieceObj.transform.SetParent(pRoot, false);
+                Vector3 targetLocalPos = new Vector3(startX + i * spacingX, benchY, 0f);
+                pieceObj.transform.localPosition = targetLocalPos + Vector3.down * 2.5f;
                 pieceObj.transform.localScale = Vector3.one * 0.82f;
 
                 var piece = pieceObj.AddComponent<AnimatedGenePiece>();
                 piece.Initialize(brokenGenes[i]);
                 piece.SetTargetScale(Vector3.one * 0.82f);
-                piece.MoveTo(targetPos, Quaternion.identity, 0.35f + i * 0.05f);
+                Vector3 worldTarget = pieceObj.transform.position + Vector3.up * 2.5f;
+                piece.MoveTo(worldTarget, Quaternion.identity, 0.35f + i * 0.05f);
                 piece.OnPieceClicked += HandlePieceClicked;
 
                 poolPieces.Add(piece);
@@ -830,6 +720,7 @@ namespace DNAPuzzle
             var brokenGenes = manager.GenePool;
             var candidates = DNAPuzzleSampleData.CreateRepairCandidatesForPlanet(planet, new List<GeneData>(brokenGenes));
 
+            Transform pRoot = puzzleRoot != null ? puzzleRoot.transform : transform;
             int count = candidates.Count;
             float spacingX = 1.95f;
             float startX = 1.35f - ((count - 1) * spacingX * 0.5f);
@@ -838,11 +729,12 @@ namespace DNAPuzzle
             for (int i = 0; i < count; i++)
             {
                 GameObject candObj = new GameObject($"RepairCandidate_{i}_{candidates[i]}");
-                candObj.transform.SetParent(transform, false);
-                Vector3 worldPos = new Vector3(startX + i * spacingX, trayY, 0f);
+                candObj.transform.SetParent(pRoot, false);
+                Vector3 localPos = new Vector3(startX + i * spacingX, trayY, 0f);
+                candObj.transform.localPosition = localPos;
 
                 var cand = candObj.AddComponent<AnimatedRepairCandidate>();
-                cand.Initialize(i, candidates[i], worldPos);
+                cand.Initialize(i, candidates[i], candObj.transform.position);
                 cand.OnCandidateClicked += HandleCandidateClicked;
 
                 repairCandidates.Add(cand);
@@ -1992,7 +1884,31 @@ namespace DNAPuzzle
         #region Taşmasız Kompakt Modern HUD Arayüzü
         private void OnGUI()
         {
-            if (isLabMode && !isTerminalActive) return;
+            if (isLabMode && !isTerminalActive)
+            {
+                if (labStationController != null && labStationController.CurrentState == CameraStationController.State.AtBase)
+                {
+                    Camera mainCam = Camera.main;
+                    if (mainCam != null && mainCam.pixelRect.Contains(Input.mousePosition))
+                    {
+                        Ray ray = mainCam.ScreenPointToRay(Input.mousePosition);
+                        if (Physics.Raycast(ray, out RaycastHit hit, 50f))
+                        {
+                            var station = hit.collider.GetComponentInParent<ScreenStation>();
+                            if (station != null && (station == monitorStation || station == tabletStation))
+                            {
+                                Vector2 mPos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+                                GUI.color = new Color(0.02f, 0.05f, 0.1f, 0.88f);
+                                GUI.Box(new Rect(mPos.x + 14f, mPos.y - 12f, 185f, 28f), GUIContent.none);
+                                GUI.color = new Color(0.2f, 1f, 0.6f);
+                                GUI.Label(new Rect(mPos.x + 20f, mPos.y - 8f, 175f, 20f), "🧬 [Tıkla: DNA Terminali]", EditorBold(11));
+                                GUI.color = Color.white;
+                            }
+                        }
+                    }
+                }
+                return;
+            }
 
             float screenW = Screen.width;
             float screenH = Screen.height;
