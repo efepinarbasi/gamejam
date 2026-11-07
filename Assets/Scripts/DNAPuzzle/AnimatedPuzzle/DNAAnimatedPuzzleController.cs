@@ -111,20 +111,14 @@ namespace DNAPuzzle
                 else if (st.gameObject.name == "ThirdScreen") chamberStation = st;
             }
 
-            // FirstScreen (uzun monitör) collider boyutunu genişlet (rahat tıklansın)
+            // Sol uzun monitör (FirstScreen): Puzzle buradan kaldırıldı, sadece ortadaki tablet/konsoldan açılır.
             if (monitorStation != null)
             {
-                var col = monitorStation.GetComponent<BoxCollider>();
-                if (col != null && col.size.x < 1.8f)
-                {
-                    col.size = new Vector3(2.4f, 1.4f, 1.2f);
-                }
                 monitorStation.onEnter.RemoveListener(OnTerminalEnter);
-                monitorStation.onEnter.AddListener(OnTerminalEnter);
                 monitorStation.onExit.RemoveListener(OnTerminalExit);
-                monitorStation.onExit.AddListener(OnTerminalExit);
             }
 
+            // Yalnızca ortadaki konsol/tablet (SecondScreen) DNA Puzzle terminalini açar
             if (tabletStation != null)
             {
                 tabletStation.onEnter.RemoveListener(OnTerminalEnter);
@@ -1895,7 +1889,7 @@ namespace DNAPuzzle
                         if (Physics.Raycast(ray, out RaycastHit hit, 50f))
                         {
                             var station = hit.collider.GetComponentInParent<ScreenStation>();
-                            if (station != null && (station == monitorStation || station == tabletStation))
+                            if (station != null && station == tabletStation)
                             {
                                 Vector2 mPos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
                                 GUI.color = new Color(0.02f, 0.05f, 0.1f, 0.88f);
