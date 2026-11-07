@@ -18,12 +18,19 @@ namespace DNAPuzzle
         public GeneData Data { get; private set; }
         public int CurrentSlotIndex { get; set; } = -1;
         public bool IsEquipped => CurrentSlotIndex >= 0;
+        public bool IsBeingDragged { get; set; } = false;
 
         private Material primaryMaterial;
         private Material borderPlaqueMat;
         private Material matRibbonBlue;
         private Material matRibbonOrange;
         private Material matHBarCore;
+        private Material leftPlugMat;
+        private Material rightPlugMat;
+        private Material leftCollarMat;
+        private Material rightKeyMat;
+        private Material jigsawBackplateMat;
+        private Material jigsawBorderMat;
         private Light coreLight;
 
         private TextMesh nameTextMesh;
@@ -114,6 +121,30 @@ namespace DNAPuzzle
 
             matHBarCore = new Material(unlitShader);
             matHBarCore.color = new Color(0.95f, 0.98f, 1f, 0.95f);
+
+            // 2.5. Otantik Yapboz Karosu Gövdesi (Jigsaw Puzzle Tile Backplate)
+            GameObject puzzleBackplate = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            puzzleBackplate.name = "JigsawTileBackplate";
+            puzzleBackplate.transform.SetParent(transform, false);
+            puzzleBackplate.transform.localPosition = new Vector3(0f, 0f, 0.12f);
+            puzzleBackplate.transform.localScale = new Vector3(2.55f, 1.80f, 0.06f);
+            Destroy(puzzleBackplate.GetComponent<Collider>());
+            jigsawBackplateMat = new Material(litShader);
+            jigsawBackplateMat.color = new Color(geneColor.r, geneColor.g, geneColor.b, 0.85f);
+            if (jigsawBackplateMat.HasProperty("_Smoothness")) jigsawBackplateMat.SetFloat("_Smoothness", 0.92f);
+            if (jigsawBackplateMat.HasProperty("_Metallic")) jigsawBackplateMat.SetFloat("_Metallic", 0.35f);
+            puzzleBackplate.GetComponent<MeshRenderer>().material = jigsawBackplateMat;
+
+            // Yapboz Karo Kenarlık Çerçevesi (Beveled Jigsaw Rim)
+            GameObject puzzleRim = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            puzzleRim.name = "JigsawTileRim";
+            puzzleRim.transform.SetParent(transform, false);
+            puzzleRim.transform.localPosition = new Vector3(0f, 0f, 0.13f);
+            puzzleRim.transform.localScale = new Vector3(2.62f, 1.86f, 0.04f);
+            Destroy(puzzleRim.GetComponent<Collider>());
+            jigsawBorderMat = new Material(unlitShader);
+            jigsawBorderMat.color = new Color(geneColor.r * 1.25f, geneColor.g * 1.25f, geneColor.b * 1.25f, 0.60f);
+            puzzleRim.GetComponent<MeshRenderer>().material = jigsawBorderMat;
 
             // 3. Kıvrımlı Üst ve Alt Heliks Yayları (Curved Double Helix Rails)
             float halfW = 1.34f;
@@ -226,27 +257,90 @@ namespace DNAPuzzle
             borderPlaqueTrans = borderPlaque.transform;
             borderPlaqueMat = borderMat;
 
-            // 6. Sol Puzzle Ucu (Nükleotid Soketi)
-            GameObject leftPlug = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            // 6. Sol Puzzle Ucu (Otantik Yapboz Dişi Kilit Oyuğu & Kavrayıcı Kollar)
+            leftCollarMat = new Material(litShader);
+            leftCollarMat.color = new Color(geneColor.r * 0.75f, geneColor.g * 0.75f, geneColor.b * 0.75f);
+            if (leftCollarMat.HasProperty("_Smoothness")) leftCollarMat.SetFloat("_Smoothness", 0.9f);
+
+            // A) Üst Kavrayıcı Kol (Upper Embracing Lobe)
+            GameObject upperLobe = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            upperLobe.name = "LeftPuzzleUpperLobe";
+            upperLobe.transform.SetParent(transform, false);
+            upperLobe.transform.localPosition = new Vector3(-1.36f, 0.40f, 0.08f);
+            upperLobe.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            upperLobe.transform.localScale = new Vector3(0.42f, 0.10f, 0.42f);
+            Destroy(upperLobe.GetComponent<Collider>());
+            upperLobe.GetComponent<MeshRenderer>().material = leftCollarMat;
+
+            // B) Alt Kavrayıcı Kol (Lower Embracing Lobe)
+            GameObject lowerLobe = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            lowerLobe.name = "LeftPuzzleLowerLobe";
+            lowerLobe.transform.SetParent(transform, false);
+            lowerLobe.transform.localPosition = new Vector3(-1.36f, -0.40f, 0.08f);
+            lowerLobe.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            lowerLobe.transform.localScale = new Vector3(0.42f, 0.10f, 0.42f);
+            Destroy(lowerLobe.GetComponent<Collider>());
+            lowerLobe.GetComponent<MeshRenderer>().material = leftCollarMat;
+
+            // C) Dişi Yuva Oyuk Yatağı (Circular Socket Pocket Recess)
+            GameObject leftSocketPocket = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            leftSocketPocket.name = "LeftPuzzleSocketFloor";
+            leftSocketPocket.transform.SetParent(transform, false);
+            leftSocketPocket.transform.localPosition = new Vector3(-1.475f, 0f, 0.09f);
+            leftSocketPocket.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            leftSocketPocket.transform.localScale = new Vector3(0.58f, 0.06f, 0.58f);
+            Destroy(leftSocketPocket.GetComponent<Collider>());
+            var pocketFloorMat = new Material(litShader);
+            pocketFloorMat.color = new Color(0.06f, 0.10f, 0.16f);
+            leftSocketPocket.GetComponent<MeshRenderer>().material = pocketFloorMat;
+
+            // D) Dişi Yuva Nükleotid Halka İndikatörü (Left Socket Ring)
+            GameObject leftPlug = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             leftPlug.name = "LeftConnector";
             leftPlug.transform.SetParent(transform, false);
-            leftPlug.transform.localPosition = new Vector3(-1.38f, 0f, 0f);
-            leftPlug.transform.localScale = new Vector3(0.38f, 0.38f, 0.38f);
+            leftPlug.transform.localPosition = new Vector3(-1.475f, 0f, 0.04f);
+            leftPlug.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            leftPlug.transform.localScale = new Vector3(0.52f, 0.04f, 0.52f);
             Destroy(leftPlug.GetComponent<Collider>());
-            var leftPlugMat = new Material(litShader);
+            leftPlugMat = new Material(litShader);
             leftPlugMat.color = DNAHelper.GetNucleotideColor(Data.leftConnector);
             leftPlug.GetComponent<MeshRenderer>().material = leftPlugMat;
 
-            // 7. Sağ Puzzle Ucu (Nükleotid Soketi)
-            GameObject rightPlug = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            // 7. Sağ Puzzle Ucu (Otantik Yapboz Erkek Kilit Dili & Yuvarlak Başlık)
+            rightKeyMat = new Material(litShader);
+            rightKeyMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
+            if (rightKeyMat.HasProperty("_Smoothness")) rightKeyMat.SetFloat("_Smoothness", 0.9f);
+
+            // A) Yapboz Boynu (Narrow Neck Protrusion)
+            GameObject rightNeck = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            rightNeck.name = "RightPuzzleNeck";
+            rightNeck.transform.SetParent(transform, false);
+            rightNeck.transform.localPosition = new Vector3(1.32f, 0f, 0.08f);
+            rightNeck.transform.localScale = new Vector3(0.20f, 0.32f, 0.10f);
+            Destroy(rightNeck.GetComponent<Collider>());
+            rightNeck.GetComponent<MeshRenderer>().material = rightKeyMat;
+
+            // B) Yapboz Yuvarlak Başlığı (Bulb Head Tab)
+            GameObject rightPlug = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             rightPlug.name = "RightConnector";
             rightPlug.transform.SetParent(transform, false);
-            rightPlug.transform.localPosition = new Vector3(1.38f, 0f, 0f);
-            rightPlug.transform.localScale = new Vector3(0.38f, 0.38f, 0.38f);
+            rightPlug.transform.localPosition = new Vector3(1.475f, 0f, 0.08f);
+            rightPlug.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            rightPlug.transform.localScale = new Vector3(0.56f, 0.12f, 0.56f);
             Destroy(rightPlug.GetComponent<Collider>());
-            var rightPlugMat = new Material(litShader);
+            rightPlugMat = new Material(litShader);
             rightPlugMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
+            if (rightPlugMat.HasProperty("_Smoothness")) rightPlugMat.SetFloat("_Smoothness", 0.92f);
             rightPlug.GetComponent<MeshRenderer>().material = rightPlugMat;
+
+            // C) Yuvarlak Başlık Bombesi (Smooth Beveled Cap)
+            GameObject rightBulbCap = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            rightBulbCap.name = "RightBulbCap";
+            rightBulbCap.transform.SetParent(transform, false);
+            rightBulbCap.transform.localPosition = new Vector3(1.475f, 0f, 0.01f);
+            rightBulbCap.transform.localScale = new Vector3(0.50f, 0.50f, 0.16f);
+            Destroy(rightBulbCap.GetComponent<Collider>());
+            rightBulbCap.GetComponent<MeshRenderer>().material = rightPlugMat;
 
             // 8. İç Parıltı Işığı
             GameObject lightObj = new GameObject("CoreLight");
@@ -260,17 +354,17 @@ namespace DNAPuzzle
 
             // 9. Cömert Dokunma Collider'ı (Tüm Kıvrımlı Alana Uygun)
             var col = gameObject.AddComponent<BoxCollider>();
-            col.size = new Vector3(2.85f, 2.20f, 0.65f);
+            col.size = new Vector3(3.05f, 2.20f, 0.65f);
 
             // 10. İsim ve Kompakt Metinler (Kristal Netlikte Anti-Aliased Yazı Tipi)
             nameTextMesh = CreateTextMesh("NameText", new Vector3(0f, 0.10f, -0.19f), 0.024f, 96, Color.white, FontStyle.Bold);
             statsTextMesh = CreateTextMesh("StatsText", new Vector3(0f, -0.10f, -0.19f), 0.020f, 84, new Color(0.85f, 0.95f, 1f), FontStyle.Bold);
 
-            leftNucMesh = CreateTextMesh("LeftNuc", new Vector3(-1.38f, 0f, -0.22f), 0.028f, 96, Color.white, FontStyle.Bold);
-            rightNucMesh = CreateTextMesh("RightNuc", new Vector3(1.38f, 0f, -0.22f), 0.028f, 96, Color.white, FontStyle.Bold);
+            leftNucMesh = CreateTextMesh("LeftNuc", new Vector3(-1.475f, 0f, -0.16f), 0.028f, 96, Color.white, FontStyle.Bold);
+            rightNucMesh = CreateTextMesh("RightNuc", new Vector3(1.475f, 0f, -0.16f), 0.028f, 96, Color.white, FontStyle.Bold);
 
-            // 11. Durum Rozeti (⚠️ BOZUK GENOM / ✅ ONARILDI) - Üstteki yuvaya çarpmaması için y=0.85f'e çekildi
-            statusBadgeMesh = CreateTextMesh("StatusBadge", new Vector3(0f, 0.85f, -0.20f), 0.020f, 84, new Color(1f, 0.4f, 0.2f), FontStyle.Bold);
+            // 11. Durum Rozeti (⚠️ BOZUK GENOM / ✅ ONARILDI) - Üst nükleotid harflerine basmaması için y=1.22f'ye alındı
+            statusBadgeMesh = CreateTextMesh("StatusBadge", new Vector3(0f, 1.22f, -0.20f), 0.020f, 84, new Color(1f, 0.4f, 0.2f), FontStyle.Bold);
         }
 
         private GameObject CreateRailSegment(Vector3 p1, Vector3 p2, float radius, Material mat, string name)
@@ -323,6 +417,10 @@ namespace DNAPuzzle
             leftNucMesh.color = DNAHelper.GetNucleotideColor(Data.leftConnector);
             rightNucMesh.text = rightLetter;
             rightNucMesh.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
+
+            if (leftPlugMat != null) leftPlugMat.color = DNAHelper.GetNucleotideColor(Data.leftConnector);
+            if (rightPlugMat != null) rightPlugMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
+            if (rightKeyMat != null) rightKeyMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
 
             // 3. 4 Adet Watson-Crick Nükleotid Basamağını Yapılandır (Şemadaki gibi)
             NucleotideType[] topSeq = new NucleotideType[4];
@@ -562,7 +660,8 @@ namespace DNAPuzzle
         public void SetZoomedInRepairLab(bool zoomed)
         {
             isZoomedInLab = zoomed;
-            float plaqueY = zoomed ? -1.06f : 0f;
+            // Odak modunda plaket alt nükleotid ve soru işaretlerine basmaması için -1.42f seviyesine indirildi
+            float plaqueY = zoomed ? -1.42f : 0f;
             if (centerPlaqueTrans != null)
                 centerPlaqueTrans.localPosition = new Vector3(0f, plaqueY, -0.15f);
             if (borderPlaqueTrans != null)
@@ -571,6 +670,12 @@ namespace DNAPuzzle
                 nameTextMesh.transform.localPosition = new Vector3(0f, plaqueY + 0.10f, -0.19f);
             if (statsTextMesh != null)
                 statsTextMesh.transform.localPosition = new Vector3(0f, plaqueY - 0.10f, -0.19f);
+
+            // Odak modundayken üst durum rozetini gizle ki üst nükleotid harflerini kapatmasın
+            if (statusBadgeMesh != null)
+            {
+                statusBadgeMesh.gameObject.SetActive(!zoomed);
+            }
         }
 
         public void MoveTo(Vector3 worldPos, Quaternion worldRot, float duration = 0.32f)
@@ -669,6 +774,8 @@ namespace DNAPuzzle
 
         private void Update()
         {
+            if (IsBeingDragged) return;
+
             if (touchPulseTimer > 0f)
             {
                 touchPulseTimer = Mathf.Max(0f, touchPulseTimer - Time.deltaTime * 4f);
@@ -728,6 +835,24 @@ namespace DNAPuzzle
             {
                 coreLight.intensity = selected ? 2.8f : baseLightIntensity;
                 coreLight.range = selected ? 3.8f : 2.6f;
+            }
+        }
+
+        public void SetConnectorGlow(bool isLeft, bool glow, bool complementary)
+        {
+            if (Data == null) return;
+            Color baseCol = DNAHelper.GetNucleotideColor(isLeft ? Data.leftConnector : Data.rightConnector);
+            Color glowCol = complementary ? new Color(0.2f, 1f, 0.45f) : new Color(1f, 0.4f, 0.3f);
+            if (isLeft)
+            {
+                Color defaultLobeCol = new Color(Data.customColor.r * 0.75f, Data.customColor.g * 0.75f, Data.customColor.b * 0.75f);
+                if (leftCollarMat != null) leftCollarMat.color = glow ? glowCol : defaultLobeCol;
+                if (leftPlugMat != null) leftPlugMat.color = glow ? glowCol : baseCol;
+            }
+            else
+            {
+                if (rightKeyMat != null) rightKeyMat.color = glow ? glowCol : baseCol;
+                if (rightPlugMat != null) rightPlugMat.color = glow ? glowCol : baseCol;
             }
         }
 
