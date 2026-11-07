@@ -1857,16 +1857,16 @@ namespace DNAPuzzle
             // Sürükle-Bırak Manyetik Geçmeli Yapboz Bilgilendirme Kartı (Interlocking HUD Banner)
             if (!string.IsNullOrEmpty(dragInterlockMessage))
             {
-                float bannerW = Mathf.Min(740f, screenW - 40f);
-                float bannerH = 34f;
-                float bx = (screenW - bannerW) * 0.5f;
-                float by = screenH - 128f;
+                float dragCardW = Mathf.Min(740f, screenW - 40f);
+                float dragCardH = 34f;
+                float dragCardX = (screenW - dragCardW) * 0.5f;
+                float dragCardY = screenH - 128f;
 
                 GUI.color = isSnapComplementary ? new Color(0.04f, 0.22f, 0.14f, 0.95f) : new Color(0.08f, 0.14f, 0.24f, 0.95f);
-                GUI.Box(new Rect(bx, by, bannerW, bannerH), GUIContent.none, EditorBox());
+                GUI.Box(new Rect(dragCardX, dragCardY, dragCardW, dragCardH), GUIContent.none, EditorBox());
 
                 GUI.color = isSnapComplementary ? new Color(0.25f, 1f, 0.5f) : new Color(1f, 0.88f, 0.35f);
-                GUI.Label(new Rect(bx + 12, by + 6, bannerW - 24, 24), dragInterlockMessage, EditorBold(12));
+                GUI.Label(new Rect(dragCardX + 12, dragCardY + 6, dragCardW - 24, 24), dragInterlockMessage, EditorBold(12));
                 GUI.color = Color.white;
             }
 
@@ -2187,16 +2187,16 @@ namespace DNAPuzzle
 
             if (!string.IsNullOrEmpty(dragInterlockMessage))
             {
-                float bannerW = Mathf.Min(740f, screenW - 40f);
-                float bannerH = 34f;
-                float bx = (screenW - bannerW) * 0.5f;
-                float by = screenH - 110f;
+                float zoomDragW = Mathf.Min(740f, screenW - 40f);
+                float zoomDragH = 34f;
+                float zoomDragX = (screenW - zoomDragW) * 0.5f;
+                float zoomDragY = screenH - 110f;
 
                 GUI.color = new Color(0.04f, 0.22f, 0.14f, 0.95f);
-                GUI.Box(new Rect(bx, by, bannerW, bannerH), GUIContent.none, EditorBox());
+                GUI.Box(new Rect(zoomDragX, zoomDragY, zoomDragW, zoomDragH), GUIContent.none, EditorBox());
 
                 GUI.color = new Color(0.25f, 1f, 0.5f);
-                GUI.Label(new Rect(bx + 12, by + 6, bannerW - 24, 24), dragInterlockMessage, EditorBold(12));
+                GUI.Label(new Rect(zoomDragX + 12, zoomDragY + 6, zoomDragW - 24, 24), dragInterlockMessage, EditorBold(12));
                 GUI.color = Color.white;
             }
 
@@ -2225,6 +2225,12 @@ namespace DNAPuzzle
             {
                 EnterRepairZoomMode(nextBrokenToZoom);
             }
+        }
+
+        private GUIStyle EditorBox()
+        {
+            var s = new GUIStyle(GUI.skin.box);
+            return s;
         }
 
         private GUIStyle EditorBold(int size)
