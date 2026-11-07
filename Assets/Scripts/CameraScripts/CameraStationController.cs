@@ -1,0 +1,174 @@
+using System.Collections;
+using UnityEngine;
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+using UnityEngine.InputSystem;
+#endif
+
+/// <summary>
+/// Kamerayı Base konumundan ekran istasyonlarına (sol / masa / sağ) animasyonla taşır.
+/// Free look yok: sadece raycast ile tıkla -> geç, Esc / sağ tık -> Base'e dön.
+/// Ana kameraya (veya kamerayı taşıyan boş bir objeye) ekle.
+/// </summary>
+public class CameraStationController : MonoBehaviour
+{
+    public enum State { AtBase, Moving, AtStation }
+
+    [Header("Referanslar")]
+    [Tooltip("Hareket ettirilecek kamera. Boşsa Camera.main kullanılır.")]
+    public Camera cam;
+    [Tooltip("Base (başlangıç) bakış noktası. Boşsa oyun başındaki kamera pozu kaydedilir.")]
+    public Transform baseAnchor;
+
+    [Header("Raycast")]
+    public LayerMask stationMask = ~0;
+    public float maxRayDistance = 50f;
+
+    [Header("Geçiş")]
+    public AnimationCurve ease = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    [Tooltip("Base'e dönüş süresi")]
+    public float returnDuration = 0.7f;
+
+    public State CurrentState { get; private set; } = State.AtBase;
+    public ScreenStation ActiveStation { get; private set; }
+
+    ScreenStation _hovered;
+    Vector3 _basePos;
+    Quaternion _baseRot;
+    float _baseFov;
+    Coroutine _moveRoutine;
+
+    void Awake()
+    {
+        if (cam == null) cam = Camera.main;
+
+        if (baseAnchor != null)
+        {
+            _basePos = baseAnchor.position;
+            _baseRot = baseAnchor.rotation;
+        }
+        else
+        {
+            _basePos = cam.transform.position;
+            _baseRot = cam.transform.rotation;
+        }
+        _baseFov = cam.fieldOfView;
+    }
+
+    void Update()
+    {
+        switch (CurrentState)
+        {
+            case State.AtBase:
+                UpdateHover();
+                if (_hovered != null && ClickDown())
+                    GoToStation(_hovered);
+                break;
+
+            case State.AtStation:
+                if (BackPressed())
+                    ReturnToBase();
+                break;
+        }
+    }
+
+    // ---------- Public API ----------
+
+    public void GoToStation(ScreenStation station)
+    {
+        if (CurrentState != State.AtBase || station == null) return;
+        SetHovered(null);
+        ActiveStation = station;
+        StartMove(station.cameraAnchor.position, station.cameraAnchor.rotation,
+                  station.OverrideFov ? station.fieldOfView : _baseFov,
+                  station.moveDuration, State.AtStation, station);
+        station.SetInteractable(false); // istasyondayken collider tıklamayı engellemesin
+    }
+
+    public void ReturnToBase()
+    {
+        if (CurrentState != State.AtStation) return;
+        var leaving = ActiveStation;
+        StartMove(_basePos, _baseRot, _baseFov, returnDuration, State.AtBase, null, leaving);
+    }
+
+    // ---------- Hareket ----------
+
+    void StartMove(Vector3 pos, Quaternion rot, float fov, float duration,
+                   State endState, ScreenStation arrived, ScreenStation left = null)
+    {
+        if (_moveRoutine != null) StopCoroutine(_moveRoutine);
+        _moveRoutine = StartCoroutine(MoveRoutine(pos, rot, fov, duration, endState, arrived, left));
+    }
+
+    IEnumerator MoveRoutine(Vector3 toPos, Quaternion toRot, float toFov, float duration,
+                            State endState, ScreenStation arrived, ScreenStation left)
+    {
+        CurrentState = State.Moving;
+        if (left != null) left.NotifyExit();
+
+        Transform t = cam.transform;
+        Vector3 fromPos = t.position;
+        Quaternion fromRot = t.rotation;
+        float fromFov = cam.fieldOfView;
+
+        float time = 0f;
+        duration = Mathf.Max(0.01f, duration);
+        while (time < duration)
+        {
+            time += Time.deltaTime;
+            float k = ease.Evaluate(Mathf.Clamp01(time / duration));
+            t.position = Vector3.LerpUnclamped(fromPos, toPos, k);
+            t.rotation = Quaternion.SlerpUnclamped(fromRot, toRot, k);
+            cam.fieldOfView = Mathf.LerpUnclamped(fromFov, toFov, k);
+            yield return null;
+        }
+
+        t.SetPositionAndRotation(toPos, toRot);
+        cam.fieldOfView = toFov;
+        CurrentState = endState;
+
+        if (arrived != null)
+        {
+            arrived.NotifyEnter();
+        }
+        else
+        {
+            if (left != null) left.SetInteractable(true);
+            ActiveStation = null;
+        }
+        _moveRoutine = null;
+    }
+
+    // ---------- Hover ----------
+
+    void UpdateHover()
+    {
+        Ray ray = cam.ScreenPointToRay(PointerPosition());
+        ScreenStation hit = null;
+        if (Physics.Raycast(ray, out RaycastHit info, maxRayDistance, stationMask, QueryTriggerInteraction.Collide))
+            hit = info.collider.GetComponentInParent<ScreenStation>();
+        SetHovered(hit);
+    }
+
+    void SetHovered(ScreenStation s)
+    {
+        if (s == _hovered) return;
+        if (_hovered != null) _hovered.SetHover(false);
+        _hovered = s;
+        if (_hovered != null) _hovered.SetHover(true);
+    }
+
+    // ---------- Input (eski + yeni Input System ile uyumlu) ----------
+
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+    static Vector2 PointerPosition() => Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+    static bool ClickDown() => Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+    static bool BackPressed() =>
+        (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame) ||
+        (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame);
+#else
+    static Vector2 PointerPosition() => Input.mousePosition;
+    static bool ClickDown() => Input.GetMouseButtonDown(0);
+    static bool BackPressed() => Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1);
+#endif
+}

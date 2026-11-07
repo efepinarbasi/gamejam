@@ -60,7 +60,7 @@ namespace DNAPuzzle.Editor
             go.AddComponent<DNAPuzzleManager>();
             go.AddComponent<DNAPuzzleTester>();
 
-            // Kameranın olduğundan emin ol
+           //Kameranın olduğundan emin ol
             if (Camera.main == null)
             {
                 var camGo = new GameObject("Main Camera");
