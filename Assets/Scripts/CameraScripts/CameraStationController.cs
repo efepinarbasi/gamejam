@@ -39,12 +39,14 @@ public class CameraStationController : MonoBehaviour
 
     void Awake()
     {
-        if (cam == null) cam = Camera.main;
+        if (cam == null) cam = GetComponent<Camera>() != null ? GetComponent<Camera>() : Camera.main;
+        if (cam == null) return;
 
-        if (baseAnchor != null)
+        if (baseAnchor != null && baseAnchor != cam.transform)
         {
             _basePos = baseAnchor.position;
             _baseRot = baseAnchor.rotation;
+            cam.transform.SetPositionAndRotation(_basePos, _baseRot);
         }
         else
         {
@@ -52,6 +54,15 @@ public class CameraStationController : MonoBehaviour
             _baseRot = cam.transform.rotation;
         }
         _baseFov = cam.fieldOfView;
+    }
+
+    void Start()
+    {
+        if (cam != null && CurrentState == State.AtBase)
+        {
+            cam.transform.SetPositionAndRotation(_basePos, _baseRot);
+            cam.fieldOfView = _baseFov;
+        }
     }
 
     void Update()
@@ -75,7 +86,7 @@ public class CameraStationController : MonoBehaviour
 
     public void GoToStation(ScreenStation station)
     {
-        if (CurrentState != State.AtBase || station == null) return;
+        if (CurrentState != State.AtBase || station == null || station.cameraAnchor == null) return;
         SetHovered(null);
         ActiveStation = station;
         StartMove(station.cameraAnchor.position, station.cameraAnchor.rotation,
@@ -143,7 +154,14 @@ public class CameraStationController : MonoBehaviour
 
     void UpdateHover()
     {
-        Ray ray = cam.ScreenPointToRay(PointerPosition());
+        if (cam == null) return;
+        Vector2 pointerPos = PointerPosition();
+        if (!cam.pixelRect.Contains(pointerPos))
+        {
+            SetHovered(null);
+            return;
+        }
+        Ray ray = cam.ScreenPointToRay(pointerPos);
         ScreenStation hit = null;
         if (Physics.Raycast(ray, out RaycastHit info, maxRayDistance, stationMask, QueryTriggerInteraction.Collide))
             hit = info.collider.GetComponentInParent<ScreenStation>();

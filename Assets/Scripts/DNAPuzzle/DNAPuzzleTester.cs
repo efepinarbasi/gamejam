@@ -11,6 +11,11 @@ namespace DNAPuzzle
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoInitializeOnPlay()
         {
+            // Lab sahnesi gibi kendi kamera/istasyon kontrolcüsü olan sahnelerde veya
+            // içinde DNAPuzzle bileşeni bulunmayan sahnelerde otomatik kurulum yapıp kamerayı değiştirme!
+            if (FindAnyObjectByType<CameraStationController>() != null) return;
+            if (FindAnyObjectByType<DNAPuzzleTester>() == null && FindAnyObjectByType<DNAPuzzleManager>() == null) return;
+
             if (FindAnyObjectByType<DNAAnimatedPuzzleController>() == null)
             {
                 var go = new GameObject("--- DNA Puzzle System (Animated 3D) ---");

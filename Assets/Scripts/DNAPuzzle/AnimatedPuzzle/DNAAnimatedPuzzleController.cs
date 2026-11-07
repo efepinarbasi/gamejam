@@ -195,25 +195,38 @@ namespace DNAPuzzle
                 camGo.tag = "MainCamera";
             }
 
-            puzzleCamera.transform.position = new Vector3(0f, 0.2f, -13.2f);
-            puzzleCamera.transform.rotation = Quaternion.identity;
-            puzzleCamera.backgroundColor = new Color(0.012f, 0.015f, 0.035f);
-            puzzleCamera.clearFlags = CameraClearFlags.SolidColor;
-            puzzleCamera.fieldOfView = 56f;
+            // Eğer sahnede CameraStationController (Lab sahnesi) varsa kameranın açısını ve ışıklarını bozma!
+            if (FindAnyObjectByType<CameraStationController>() == null && puzzleCamera.GetComponent<CameraStationController>() == null)
+            {
+                puzzleCamera.transform.position = new Vector3(0f, 0.2f, -13.2f);
+                puzzleCamera.transform.rotation = Quaternion.identity;
+                puzzleCamera.backgroundColor = new Color(0.012f, 0.015f, 0.035f);
+                puzzleCamera.clearFlags = CameraClearFlags.SolidColor;
+                puzzleCamera.fieldOfView = 56f;
+            }
 
             RenderSettings.ambientLight = new Color(0.2f, 0.28f, 0.42f);
 
-            // 1. Ana Işık (Key Light)
-            var dirLight = FindAnyObjectByType<Light>();
+            // 1. Ana Işık (Key Light - Sadece Directional Light ara, Spot/Point ışıkları bozma)
+            Light dirLight = null;
+            foreach (var l in FindObjectsByType<Light>())
+            {
+                if (l != null && l.type == LightType.Directional)
+                {
+                    dirLight = l;
+                    break;
+                }
+            }
             if (dirLight == null)
             {
                 var lightGo = new GameObject("SciFiDirectionalLight");
+                lightGo.transform.SetParent(transform, false);
                 dirLight = lightGo.AddComponent<Light>();
                 dirLight.type = LightType.Directional;
+                dirLight.transform.rotation = Quaternion.Euler(38f, -25f, 0f);
+                dirLight.color = new Color(0.92f, 0.96f, 1f);
+                dirLight.intensity = 1.3f;
             }
-            dirLight.transform.rotation = Quaternion.Euler(38f, -25f, 0f);
-            dirLight.color = new Color(0.92f, 0.96f, 1f);
-            dirLight.intensity = 1.3f;
 
             // 2. Sinematik Yan Neon Işık (Elektrik Camgöbeği)
             var rimLightGo = new GameObject("CyanRimLight");
