@@ -68,6 +68,22 @@ namespace DNAPuzzle
 
         private LineRenderer snapGuideLine;
 
+        #region Laboratuvar İstasyon & Monitör Entegrasyonu
+        [Header("Laboratuvar İstasyon & Monitör Entegrasyonu")]
+        public bool isLabMode { get; private set; } = false;
+        public bool isTerminalActive { get; private set; } = true;
+        private CameraStationController labStationController;
+        private Camera dedicatedTerminalCamera;
+        private ScreenStation monitorStation;
+        private ScreenStation tabletStation;
+        private ScreenStation chamberStation;
+        private GameObject monitorHoloObj;
+        private GameObject tabletHoloObj;
+        private GameObject labChamberCreature;
+        private TextMesh monitorHoloActionText;
+        private Transform monitorHelixParent;
+        #endregion
+
         private void Awake()
         {
             if (Instance == null) Instance = this;
@@ -79,10 +95,351 @@ namespace DNAPuzzle
             EnsurePuzzleInitialized();
         }
 
+        #region Laboratuvar İstasyon & Monitör Entegrasyon Metotları
+        public void InitializeForLabStation(CameraStationController stationCtrl)
+        {
+            isLabMode = true;
+            labStationController = stationCtrl;
+            isTerminalActive = false;
+
+            // 3D Puzzle sistemini Lab odasının 120 birim altına taşı (çakışma ve karmaşayı sıfırla)
+            transform.position = new Vector3(0f, -120f, 0f);
+
+            // Lab odasındaki ekran istasyonlarını tespit et
+            foreach (var st in Object.FindObjectsByType<ScreenStation>(FindObjectsSortMode.None))
+            {
+                if (st == null) continue;
+                if (st.gameObject.name == "FirstScreen") monitorStation = st;
+                else if (st.gameObject.name == "SecondScreen") tabletStation = st;
+                else if (st.gameObject.name == "ThirdScreen") chamberStation = st;
+            }
+
+            // FirstScreen (uzun monitör) collider boyutunu genişlet (rahat tıklansın)
+            if (monitorStation != null)
+            {
+                var col = monitorStation.GetComponent<BoxCollider>();
+                if (col != null && col.size.x < 1.8f)
+                {
+                    col.size = new Vector3(2.4f, 1.4f, 1.2f);
+                }
+                monitorStation.onEnter.RemoveListener(OnTerminalEnter);
+                monitorStation.onEnter.AddListener(OnTerminalEnter);
+                monitorStation.onExit.RemoveListener(OnTerminalExit);
+                monitorStation.onExit.AddListener(OnTerminalExit);
+
+                BuildMonitorHoloOverlay(monitorStation);
+            }
+
+            if (tabletStation != null)
+            {
+                tabletStation.onEnter.RemoveListener(OnTerminalEnter);
+                tabletStation.onEnter.AddListener(OnTerminalEnter);
+                tabletStation.onExit.RemoveListener(OnTerminalExit);
+                tabletStation.onExit.AddListener(OnTerminalExit);
+
+                BuildTabletHoloOverlay(tabletStation);
+            }
+
+            EnsurePuzzleInitialized();
+
+            // Başlangıçta terminal kamerasını kapalı tut (oyuncu odayı görsün)
+            if (dedicatedTerminalCamera != null)
+            {
+                dedicatedTerminalCamera.gameObject.SetActive(false);
+            }
+        }
+
+        private void BuildMonitorHoloOverlay(ScreenStation station)
+        {
+            if (monitorHoloObj != null) Destroy(monitorHoloObj);
+
+            monitorHoloObj = new GameObject("MonitorHoloPrompt");
+            monitorHoloObj.transform.SetParent(station.transform, false);
+            // FirstScreen pozisyonu (0.223, 3.24, -0.921). Ekrana doğru hafif öne ve yukarı al:
+            monitorHoloObj.transform.localPosition = new Vector3(-0.35f, 0.35f, -0.18f);
+
+            // 1. Holografik Yarı Saydam Zemin (Backplate Quad)
+            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.name = "HoloBackplate";
+            quad.transform.SetParent(monitorHoloObj.transform, false);
+            quad.transform.localScale = new Vector3(2.2f, 1.2f, 1f);
+            var col = quad.GetComponent<Collider>();
+            if (col != null) Destroy(col); // Tıklamayı FirstScreen box collider'ına bırak
+            var ren = quad.GetComponent<Renderer>();
+            ren.material = CreateHoloMaterial(new Color(0.02f, 0.12f, 0.25f, 0.78f), true);
+
+            // 2. Holografik Dönen Mini 3D DNA Sarmalı
+            var helixGo = new GameObject("MiniDNAHelix");
+            helixGo.transform.SetParent(monitorHoloObj.transform, false);
+            helixGo.transform.localPosition = new Vector3(0.75f, 0f, -0.05f);
+            monitorHelixParent = helixGo.transform;
+
+            Color[] nucColors = new Color[] {
+                new Color(0.15f, 0.85f, 1f),
+                new Color(0.95f, 0.25f, 0.5f),
+                new Color(0.2f, 1f, 0.4f),
+                new Color(1f, 0.8f, 0.1f)
+            };
+
+            for (int i = 0; i < 6; i++)
+            {
+                float t = i / 5f;
+                float angle = t * Mathf.PI * 2f;
+                float y = (t - 0.5f) * 0.7f;
+                float r = 0.22f;
+
+                var s1 = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                s1.transform.SetParent(monitorHelixParent, false);
+                s1.transform.localPosition = new Vector3(Mathf.Cos(angle) * r, y, Mathf.Sin(angle) * r);
+                s1.transform.localScale = Vector3.one * 0.08f;
+                if (s1.GetComponent<Collider>()) Destroy(s1.GetComponent<Collider>());
+                s1.GetComponent<Renderer>().material = CreateHoloMaterial(nucColors[i % 4], false);
+
+                var s2 = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                s2.transform.SetParent(monitorHelixParent, false);
+                s2.transform.localPosition = new Vector3(Mathf.Cos(angle + Mathf.PI) * r, y, Mathf.Sin(angle + Mathf.PI) * r);
+                s2.transform.localScale = Vector3.one * 0.08f;
+                if (s2.GetComponent<Collider>()) Destroy(s2.GetComponent<Collider>());
+                s2.GetComponent<Renderer>().material = CreateHoloMaterial(nucColors[(i + 2) % 4], false);
+            }
+
+            // 3. 3D Metinler (TextMesh)
+            CreateTextMeshOn(monitorHoloObj.transform, "TitleText", "🧬 GENOM TERMİNALİ", new Vector3(-0.25f, 0.32f, -0.06f), 0.032f, 96, new Color(0.1f, 0.95f, 1f));
+            monitorHoloActionText = CreateTextMeshOn(monitorHoloObj.transform, "ActionText", "[ SOL TIKLA: DNA DÜZENLEYİCİ ]", new Vector3(-0.25f, 0.02f, -0.06f), 0.024f, 84, new Color(0.25f, 1f, 0.5f));
+            CreateTextMeshOn(monitorHoloObj.transform, "StatusText", "DURUM: ÇEVRİMİÇİ • 3 GEZEGEN HAZIR", new Vector3(-0.25f, -0.28f, -0.06f), 0.018f, 72, new Color(0.75f, 0.88f, 1f, 0.85f));
+        }
+
+        private void BuildTabletHoloOverlay(ScreenStation station)
+        {
+            if (tabletHoloObj != null) Destroy(tabletHoloObj);
+
+            tabletHoloObj = new GameObject("TabletHoloPrompt");
+            tabletHoloObj.transform.SetParent(station.transform, false);
+            tabletHoloObj.transform.localPosition = new Vector3(0f, 0.6f, 0f);
+
+            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.name = "HoloBackplate";
+            quad.transform.SetParent(tabletHoloObj.transform, false);
+            quad.transform.localScale = new Vector3(1.4f, 0.7f, 1f);
+            var col = quad.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            quad.GetComponent<Renderer>().material = CreateHoloMaterial(new Color(0.04f, 0.15f, 0.3f, 0.8f), true);
+
+            CreateTextMeshOn(tabletHoloObj.transform, "TitleText", "🧬 DNA TABLETİ", new Vector3(0f, 0.16f, -0.04f), 0.028f, 88, new Color(0.2f, 0.95f, 1f));
+            CreateTextMeshOn(tabletHoloObj.transform, "ActionText", "[ TIKLA: AÇ ]", new Vector3(0f, -0.12f, -0.04f), 0.022f, 76, new Color(0.3f, 1f, 0.6f));
+        }
+
+        private Material CreateHoloMaterial(Color col, bool transparent = true)
+        {
+            Shader s = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color");
+            var mat = new Material(s);
+            mat.color = col;
+            if (transparent)
+            {
+                mat.SetFloat("_Surface", 1); // Transparent in URP
+                mat.SetFloat("_Blend", 0); // Alpha
+                mat.renderQueue = 3000;
+            }
+            return mat;
+        }
+
+        private TextMesh CreateTextMeshOn(Transform parent, string name, string text, Vector3 localPos, float charSize, int fontSize, Color color)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            var tm = go.AddComponent<TextMesh>();
+            tm.text = text;
+            tm.characterSize = charSize;
+            tm.fontSize = fontSize;
+            tm.fontStyle = FontStyle.Bold;
+            tm.alignment = TextAlignment.Center;
+            tm.anchor = TextAnchor.MiddleCenter;
+            tm.color = color;
+            return tm;
+        }
+
+        private void UpdateLabHoloPreview()
+        {
+            if (!isLabMode) return;
+
+            // Kamera odadayken holoları kameraya döndür ve süzdür
+            Camera roomCam = Camera.main;
+            if (roomCam != null)
+            {
+                if (monitorHoloObj != null)
+                {
+                    Vector3 toCam = roomCam.transform.position - monitorHoloObj.transform.position;
+                    if (toCam.sqrMagnitude > 0.01f)
+                    {
+                        monitorHoloObj.transform.rotation = Quaternion.LookRotation(-toCam.normalized, Vector3.up);
+                    }
+
+                    // Hover durumuna göre aksiyon metnini parlat ve nabız gibi attır
+                    float pulse = Mathf.Sin(Time.time * 4f);
+                    if (monitorHoloActionText != null)
+                    {
+                        monitorHoloActionText.color = Color.Lerp(new Color(0.2f, 1f, 0.5f), new Color(1f, 0.9f, 0.2f), (pulse + 1f) * 0.5f);
+                    }
+                }
+
+                if (tabletHoloObj != null)
+                {
+                    Vector3 toCam = roomCam.transform.position - tabletHoloObj.transform.position;
+                    if (toCam.sqrMagnitude > 0.01f)
+                    {
+                        tabletHoloObj.transform.rotation = Quaternion.LookRotation(-toCam.normalized, Vector3.up);
+                    }
+                }
+            }
+
+            if (monitorHelixParent != null)
+            {
+                monitorHelixParent.Rotate(0f, 65f * Time.deltaTime, 0f, Space.Self);
+            }
+
+            // Kuluçka odasındaki canlıyı yavaşça yüzdür
+            if (labChamberCreature != null)
+            {
+                labChamberCreature.transform.Rotate(Vector3.up, 24f * Time.deltaTime, Space.World);
+                var p = labChamberCreature.transform.position;
+                p.y = 4.8f + Mathf.Sin(Time.time * 2f) * 0.15f;
+                labChamberCreature.transform.position = p;
+            }
+        }
+
+        public void OnTerminalEnter()
+        {
+            if (!isLabMode) return;
+            isTerminalActive = true;
+            if (dedicatedTerminalCamera != null)
+            {
+                dedicatedTerminalCamera.gameObject.SetActive(true);
+            }
+            audioManager?.PlayResonance();
+            audioManager?.PlaySnap();
+        }
+
+        public void OnTerminalExit()
+        {
+            if (!isLabMode) return;
+            if (isRepairZoomMode)
+            {
+                ExitRepairZoomMode();
+            }
+            isTerminalActive = false;
+            if (dedicatedTerminalCamera != null)
+            {
+                dedicatedTerminalCamera.gameObject.SetActive(false);
+            }
+        }
+
+        public void ReturnToLabRoom()
+        {
+            if (!isLabMode || !isTerminalActive) return;
+            OnTerminalExit();
+            if (labStationController != null)
+            {
+                labStationController.ReturnToBase();
+            }
+        }
+
+        public void SpawnCreatureInLabChamber(SynthesizedCreatureData creature)
+        {
+            if (!isLabMode || creature == null || !creature.isValid) return;
+
+            if (labChamberCreature != null) Destroy(labChamberCreature);
+
+            labChamberCreature = new GameObject("LabChamberSynthesizedCreature");
+            // Glass arkasında kuluçka odasının merkezi: (6.5, 4.8, -4.3)
+            labChamberCreature.transform.position = new Vector3(6.5f, 4.8f, -4.3f);
+
+            // 1. Canlı Biyo-Çekirdeği (Glowing Specimen Core)
+            var coreGo = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            coreGo.name = "BioCore";
+            coreGo.transform.SetParent(labChamberCreature.transform, false);
+            coreGo.transform.localScale = Vector3.one * 1.5f;
+            if (coreGo.GetComponent<Collider>()) Destroy(coreGo.GetComponent<Collider>());
+            var ren = coreGo.GetComponent<Renderer>();
+
+            Color coreColor = new Color(0.2f, 0.9f, 1f);
+            if (creature.planet != null)
+            {
+                if (creature.planet.planetType == PlanetType.Pyros_9) coreColor = new Color(1f, 0.45f, 0.1f);
+                else if (creature.planet.planetType == PlanetType.Cryo_Kore) coreColor = new Color(0.15f, 0.85f, 1f);
+                else if (creature.planet.planetType == PlanetType.Toxis_Prime) coreColor = new Color(0.35f, 1f, 0.2f);
+            }
+            ren.material = CreateHoloMaterial(coreColor, false);
+
+            // 2. Etrafında Dönen Enerji Halkası
+            var ringGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            ringGo.name = "OrbitalShield";
+            ringGo.transform.SetParent(labChamberCreature.transform, false);
+            ringGo.transform.localScale = new Vector3(2.4f, 0.04f, 2.4f);
+            ringGo.transform.localRotation = Quaternion.Euler(25f, 0f, 35f);
+            if (ringGo.GetComponent<Collider>()) Destroy(ringGo.GetComponent<Collider>());
+            ringGo.GetComponent<Renderer>().material = CreateHoloMaterial(new Color(coreColor.r, coreColor.g, coreColor.b, 0.6f), true);
+
+            // 3. İç Işık (Point Light)
+            var lightGo = new GameObject("SpecimenLight");
+            lightGo.transform.SetParent(labChamberCreature.transform, false);
+            var pl = lightGo.AddComponent<Light>();
+            pl.type = LightType.Point;
+            pl.color = coreColor;
+            pl.range = 8f;
+            pl.intensity = 3.5f;
+
+            // 4. Numune Bilgi Tabelası (Plaque)
+            string specName = creature.phenotype != null ? creature.phenotype.organismName : "Biyo-Organizması";
+            CreateTextMeshOn(labChamberCreature.transform, "SpecimenPlaque",
+                $"🔬 DENEYSEL CANLI: {specName}\n[ Kararlılık: %{creature.totalScore:F0} • Yaşam: AKTİF ]",
+                new Vector3(0f, 1.6f, 0f), 0.035f, 96, Color.white);
+        }
+
+        public void ViewInLabChamber()
+        {
+            if (!isLabMode) return;
+            showSynthesisModal = false;
+            isTerminalActive = false;
+            if (dedicatedTerminalCamera != null)
+            {
+                dedicatedTerminalCamera.gameObject.SetActive(false);
+            }
+            if (chamberStation != null && labStationController != null)
+            {
+                labStationController.GoToStation(chamberStation);
+            }
+            else if (labStationController != null)
+            {
+                labStationController.ReturnToBase();
+            }
+        }
+        #endregion
+
         private void EnsurePuzzleInitialized()
         {
             if (!Application.isPlaying) return;
             if (Instance == null) Instance = this;
+
+            if (!isLabMode)
+            {
+                var sc = Object.FindAnyObjectByType<CameraStationController>();
+                if (sc != null)
+                {
+                    InitializeForLabStation(sc);
+                    return;
+                }
+            }
+
+            CameraStationController.IsInputIntercepted = () =>
+            {
+                if (isLabMode && isTerminalActive && isRepairZoomMode)
+                {
+                    ExitRepairZoomMode();
+                    return true;
+                }
+                return false;
+            };
 
             if (activeSlots != null && activeSlots.Count > 0 && activeSlots[0] != null && manager != null && labScreen != null)
             {
@@ -182,11 +539,66 @@ namespace DNAPuzzle
                 res
             );
 
+            if (isLabMode && lastSynthesizedCreature != null && lastSynthesizedCreature.isValid)
+            {
+                SpawnCreatureInLabChamber(lastSynthesizedCreature);
+            }
+
             RefreshAllStates();
         }
 
         private void SetupCameraAndLighting()
         {
+            if (isLabMode)
+            {
+                if (dedicatedTerminalCamera == null)
+                {
+                    var camGo = new GameObject("TerminalPuzzleCamera");
+                    camGo.transform.SetParent(transform, false);
+                    camGo.transform.localPosition = new Vector3(0f, 0.2f, -13.2f);
+                    camGo.transform.localRotation = Quaternion.identity;
+                    dedicatedTerminalCamera = camGo.AddComponent<Camera>();
+                    dedicatedTerminalCamera.clearFlags = CameraClearFlags.SolidColor;
+                    dedicatedTerminalCamera.backgroundColor = new Color(0.012f, 0.015f, 0.035f);
+                    dedicatedTerminalCamera.fieldOfView = 56f;
+                    dedicatedTerminalCamera.depth = 12; // MainCamera'nın (depth 0) üstünde çizilir
+                }
+                puzzleCamera = dedicatedTerminalCamera;
+                if (!isTerminalActive)
+                {
+                    dedicatedTerminalCamera.gameObject.SetActive(false);
+                }
+
+                // Lab sahnesinde odanın genel ışığını bozmamak için puzzle'a özel yerel point ışıklar oluştur
+                var localKeyLightGo = new GameObject("TerminalLocalKeyLight");
+                localKeyLightGo.transform.SetParent(transform, false);
+                var localKey = localKeyLightGo.AddComponent<Light>();
+                localKey.type = LightType.Point;
+                localKey.transform.localPosition = new Vector3(0f, 5f, -8f);
+                localKey.range = 35f;
+                localKey.intensity = 2.5f;
+                localKey.color = new Color(0.92f, 0.96f, 1f);
+
+                var rimLightGo = new GameObject("CyanRimLight");
+                rimLightGo.transform.SetParent(transform, false);
+                var rimLight = rimLightGo.AddComponent<Light>();
+                rimLight.type = LightType.Point;
+                rimLight.transform.localPosition = new Vector3(-8f, 4f, -4f);
+                rimLight.color = new Color(0.1f, 0.8f, 1f);
+                rimLight.range = 25f;
+                rimLight.intensity = 2.2f;
+
+                var warmLightGo = new GameObject("PlasmaRimLight");
+                warmLightGo.transform.SetParent(transform, false);
+                var warmLight = warmLightGo.AddComponent<Light>();
+                warmLight.type = LightType.Point;
+                warmLight.range = 25f;
+                warmLight.transform.localPosition = new Vector3(8f, -2f, -3f);
+                warmLight.color = new Color(0.75f, 0.2f, 1f);
+                warmLight.intensity = 1.8f;
+                return;
+            }
+
             puzzleCamera = Camera.main;
             if (puzzleCamera == null)
             {
@@ -195,21 +607,16 @@ namespace DNAPuzzle
                 camGo.tag = "MainCamera";
             }
 
-            // Eğer sahnede CameraStationController (Lab sahnesi) varsa kameranın açısını ve ışıklarını bozma!
-            if (FindAnyObjectByType<CameraStationController>() == null && puzzleCamera.GetComponent<CameraStationController>() == null)
-            {
-                puzzleCamera.transform.position = new Vector3(0f, 0.2f, -13.2f);
-                puzzleCamera.transform.rotation = Quaternion.identity;
-                puzzleCamera.backgroundColor = new Color(0.012f, 0.015f, 0.035f);
-                puzzleCamera.clearFlags = CameraClearFlags.SolidColor;
-                puzzleCamera.fieldOfView = 56f;
-            }
-
+            // Normal Standalone mod
+            puzzleCamera.transform.position = new Vector3(0f, 0.2f, -13.2f);
+            puzzleCamera.transform.rotation = Quaternion.identity;
+            puzzleCamera.backgroundColor = new Color(0.012f, 0.015f, 0.035f);
+            puzzleCamera.clearFlags = CameraClearFlags.SolidColor;
+            puzzleCamera.fieldOfView = 56f;
             RenderSettings.ambientLight = new Color(0.2f, 0.28f, 0.42f);
 
-            // 1. Ana Işık (Key Light - Sadece Directional Light ara, Spot/Point ışıkları bozma)
             Light dirLight = null;
-            foreach (var l in FindObjectsByType<Light>())
+            foreach (var l in FindObjectsByType<Light>(FindObjectsSortMode.None))
             {
                 if (l != null && l.type == LightType.Directional)
                 {
@@ -228,25 +635,23 @@ namespace DNAPuzzle
                 dirLight.intensity = 1.3f;
             }
 
-            // 2. Sinematik Yan Neon Işık (Elektrik Camgöbeği)
-            var rimLightGo = new GameObject("CyanRimLight");
-            rimLightGo.transform.SetParent(transform, false);
-            var rimLight = rimLightGo.AddComponent<Light>();
-            rimLight.type = LightType.Point;
-            rimLight.transform.position = new Vector3(-8f, 4f, -4f);
-            rimLight.color = new Color(0.1f, 0.8f, 1f);
-            rimLight.range = 14f;
-            rimLight.intensity = 2.2f;
+            var rimLightGo2 = new GameObject("CyanRimLight");
+            rimLightGo2.transform.SetParent(transform, false);
+            var rimLight2 = rimLightGo2.AddComponent<Light>();
+            rimLight2.type = LightType.Point;
+            rimLight2.transform.position = new Vector3(-8f, 4f, -4f);
+            rimLight2.color = new Color(0.1f, 0.8f, 1f);
+            rimLight2.range = 14f;
+            rimLight2.intensity = 2.2f;
 
-            // 3. Karşı Sinematik Yan Işık (Plazma Menekşesi)
-            var warmLightGo = new GameObject("PlasmaRimLight");
-            warmLightGo.transform.SetParent(transform, false);
-            var warmLight = warmLightGo.AddComponent<Light>();
-            warmLight.type = LightType.Point;
-            warmLight.range = 14f;
-            warmLight.transform.position = new Vector3(8f, -2f, -3f);
-            warmLight.color = new Color(0.75f, 0.2f, 1f);
-            warmLight.intensity = 1.8f;
+            var warmLightGo2 = new GameObject("PlasmaRimLight");
+            warmLightGo2.transform.SetParent(transform, false);
+            var warmLight2 = warmLightGo2.AddComponent<Light>();
+            warmLight2.type = LightType.Point;
+            warmLight2.range = 14f;
+            warmLight2.transform.position = new Vector3(8f, -2f, -3f);
+            warmLight2.color = new Color(0.75f, 0.2f, 1f);
+            warmLight2.intensity = 1.8f;
         }
 
         private void BuildStunningSciFiChamber()
@@ -1203,6 +1608,30 @@ namespace DNAPuzzle
         private void Update()
         {
             EnsurePuzzleInitialized();
+
+            if (isLabMode && !isTerminalActive)
+            {
+                UpdateLabHoloPreview();
+                return;
+            }
+
+            if (isLabMode && isTerminalActive)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
+                {
+                    if (isRepairZoomMode)
+                    {
+                        ExitRepairZoomMode();
+                        return;
+                    }
+                    else
+                    {
+                        ReturnToLabRoom();
+                        return;
+                    }
+                }
+            }
+
             if (isSimulating || showSynthesisModal) return;
 
             Camera cam = puzzleCamera != null ? puzzleCamera : Camera.main;
@@ -1560,8 +1989,21 @@ namespace DNAPuzzle
         #region Taşmasız Kompakt Modern HUD Arayüzü
         private void OnGUI()
         {
+            if (isLabMode && !isTerminalActive) return;
+
             float screenW = Screen.width;
             float screenH = Screen.height;
+
+            if (isLabMode && isTerminalActive)
+            {
+                GUI.backgroundColor = new Color(0.85f, 0.25f, 0.25f, 0.95f);
+                if (GUI.Button(new Rect(screenW - 195f, 10f, 180f, 36f), "↩️ ODAYA DÖN (ESC)", EditorBold(12)))
+                {
+                    ReturnToLabRoom();
+                    return;
+                }
+                GUI.backgroundColor = Color.white;
+            }
 
             // Tam Ekran Genom Biyo-Onarım & İnceleme Modu
             if (isRepairZoomMode && zoomedGenome != null)
@@ -1995,6 +2437,15 @@ namespace DNAPuzzle
             if (GUILayout.Button("🚀 CANLIYI OYUNA / ARKADAŞLARINA AKTAR", GUILayout.Height(34)))
             {
                 triggerDispatch = true;
+            }
+
+            if (isLabMode && chamberStation != null)
+            {
+                GUI.backgroundColor = new Color(0.2f, 0.95f, 0.6f);
+                if (GUILayout.Button("🔬 KULUÇKA ODASINA BAK", GUILayout.Height(34)))
+                {
+                    ViewInLabChamber();
+                }
             }
 
             GUI.backgroundColor = new Color(0.35f, 0.45f, 0.6f);

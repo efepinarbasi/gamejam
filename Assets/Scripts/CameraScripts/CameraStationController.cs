@@ -31,6 +31,11 @@ public class CameraStationController : MonoBehaviour
     public State CurrentState { get; private set; } = State.AtBase;
     public ScreenStation ActiveStation { get; private set; }
 
+    /// <summary>
+    /// Terminal içi alt menü veya modal açıkken ESC/Sağ tıkın Base'e dönmesini engellemek için geri çağırım.
+    /// </summary>
+    public static System.Func<bool> IsInputIntercepted;
+
     ScreenStation _hovered;
     Vector3 _basePos;
     Quaternion _baseRot;
@@ -77,7 +82,16 @@ public class CameraStationController : MonoBehaviour
 
             case State.AtStation:
                 if (BackPressed())
-                    ReturnToBase();
+                {
+                    if (IsInputIntercepted != null && IsInputIntercepted())
+                    {
+                        // Terminal veya alt arayüz tarafından yakalandı, Base'e dönme
+                    }
+                    else
+                    {
+                        ReturnToBase();
+                    }
+                }
                 break;
         }
     }
@@ -86,12 +100,14 @@ public class CameraStationController : MonoBehaviour
 
     public void GoToStation(ScreenStation station)
     {
-        if (CurrentState != State.AtBase || station == null || station.cameraAnchor == null) return;
+        if (station == null || station.cameraAnchor == null) return;
+        if (CurrentState == State.Moving) return;
+        var leaving = ActiveStation;
         SetHovered(null);
         ActiveStation = station;
         StartMove(station.cameraAnchor.position, station.cameraAnchor.rotation,
                   station.OverrideFov ? station.fieldOfView : _baseFov,
-                  station.moveDuration, State.AtStation, station);
+                  station.moveDuration, State.AtStation, station, leaving);
         station.SetInteractable(false); // istasyondayken collider tıklamayı engellemesin
     }
 
@@ -141,6 +157,7 @@ public class CameraStationController : MonoBehaviour
         if (arrived != null)
         {
             arrived.NotifyEnter();
+            if (left != null && left != arrived) left.SetInteractable(true);
         }
         else
         {
