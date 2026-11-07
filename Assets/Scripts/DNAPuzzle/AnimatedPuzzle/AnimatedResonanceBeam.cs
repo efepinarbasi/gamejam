@@ -11,7 +11,7 @@ namespace DNAPuzzle
         private bool isMismatch = false;
 
         private float zapTimer = 0f;
-        private int segments = 10;
+        private int segments = 24;
 
         private void Awake()
         {
@@ -42,15 +42,17 @@ namespace DNAPuzzle
 
             if (isResonant)
             {
-                lineRenderer.material.color = new Color(0.1f, 1f, 0.45f);
-                lineRenderer.startWidth = 0.16f;
-                lineRenderer.endWidth = 0.16f;
+                lineRenderer.material.color = new Color(0.15f, 1f, 0.45f);
+                lineRenderer.startWidth = 0.10f;
+                lineRenderer.endWidth = 0.10f;
+                lineRenderer.loop = true;
             }
             else if (isMismatch)
             {
                 lineRenderer.material.color = new Color(1f, 0.25f, 0.25f);
                 lineRenderer.startWidth = 0.08f;
                 lineRenderer.endWidth = 0.08f;
+                lineRenderer.loop = false;
             }
         }
 
@@ -59,26 +61,36 @@ namespace DNAPuzzle
             if (!lineRenderer.enabled || startTarget == null || endTarget == null)
                 return;
 
-            zapTimer += Time.deltaTime * 25f;
+            zapTimer += Time.deltaTime * 20f;
 
-            Vector3 startPos = startTarget.position + new Vector3(1.46f, 0f, 0f);
-            Vector3 endPos = endTarget.position + new Vector3(-1.46f, 0f, 0f);
+            Vector3 seamCenter = (startTarget.position + endTarget.position) * 0.5f + new Vector3(0f, 0f, -0.10f);
 
-            for (int i = 0; i < segments; i++)
+            if (isResonant)
             {
-                float t = (float)i / (segments - 1);
-                Vector3 p = Vector3.Lerp(startPos, endPos, t);
-
-                if (i > 0 && i < segments - 1)
+                // Geçmeli yapboz ucu kilit halkası (Interlocking Puzzle Ring Glow)
+                float pulseRadius = 0.32f + Mathf.Sin(zapTimer * 0.4f) * 0.03f;
+                for (int i = 0; i < segments; i++)
                 {
-                    // Elektrik kıvılcımı dalgalanması (Jitter)
-                    float jitterAmount = isResonant ? 0.06f : 0.14f;
-                    float offset = Mathf.Sin(zapTimer + i * 2f) * jitterAmount;
-                    p.y += offset;
-                    p.z += Mathf.Cos(zapTimer + i * 1.5f) * jitterAmount;
+                    float angle = ((float)i / segments) * Mathf.PI * 2f + (zapTimer * 0.15f);
+                    Vector3 p = seamCenter + new Vector3(Mathf.Cos(angle) * pulseRadius, Mathf.Sin(angle) * pulseRadius, 0f);
+                    lineRenderer.SetPosition(i, p);
                 }
-
-                lineRenderer.SetPosition(i, p);
+            }
+            else if (isMismatch)
+            {
+                // Uyumsuzluk kıvılcımı
+                Vector3 p1 = seamCenter + new Vector3(-0.35f, 0f, 0f);
+                Vector3 p2 = seamCenter + new Vector3(0.35f, 0f, 0f);
+                for (int i = 0; i < segments; i++)
+                {
+                    float t = (float)i / (segments - 1);
+                    Vector3 p = Vector3.Lerp(p1, p2, t);
+                    if (i > 0 && i < segments - 1)
+                    {
+                        p.y += Mathf.Sin(zapTimer + i * 2.5f) * 0.15f;
+                    }
+                    lineRenderer.SetPosition(i, p);
+                }
             }
         }
     }
