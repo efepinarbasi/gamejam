@@ -18,12 +18,17 @@ namespace DNAPuzzle
         public GeneData Data { get; private set; }
         public int CurrentSlotIndex { get; set; } = -1;
         public bool IsEquipped => CurrentSlotIndex >= 0;
+        public bool IsBeingDragged { get; set; } = false;
 
         private Material primaryMaterial;
         private Material borderPlaqueMat;
         private Material matRibbonBlue;
         private Material matRibbonOrange;
         private Material matHBarCore;
+        private Material leftPlugMat;
+        private Material rightPlugMat;
+        private Material leftCollarMat;
+        private Material rightKeyMat;
         private Light coreLight;
 
         private TextMesh nameTextMesh;
@@ -226,27 +231,53 @@ namespace DNAPuzzle
             borderPlaqueTrans = borderPlaque.transform;
             borderPlaqueMat = borderMat;
 
-            // 6. Sol Puzzle Ucu (Nükleotid Soketi)
+            // 6. Sol Puzzle Ucu (Nükleotid Dişi Soketi & Geçmeli Bilezik)
             GameObject leftPlug = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             leftPlug.name = "LeftConnector";
             leftPlug.transform.SetParent(transform, false);
             leftPlug.transform.localPosition = new Vector3(-1.38f, 0f, 0f);
             leftPlug.transform.localScale = new Vector3(0.38f, 0.38f, 0.38f);
             Destroy(leftPlug.GetComponent<Collider>());
-            var leftPlugMat = new Material(litShader);
+            leftPlugMat = new Material(litShader);
             leftPlugMat.color = DNAHelper.GetNucleotideColor(Data.leftConnector);
             leftPlug.GetComponent<MeshRenderer>().material = leftPlugMat;
 
-            // 7. Sağ Puzzle Ucu (Nükleotid Soketi)
+            // Sol Dişi Geçmeli Soket Bileziği (Female Puzzle Ring)
+            GameObject leftCollar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            leftCollar.name = "LeftPuzzleCollar";
+            leftCollar.transform.SetParent(transform, false);
+            leftCollar.transform.localPosition = new Vector3(-1.40f, 0f, 0f);
+            leftCollar.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            leftCollar.transform.localScale = new Vector3(0.48f, 0.08f, 0.48f);
+            Destroy(leftCollar.GetComponent<Collider>());
+            leftCollarMat = new Material(litShader);
+            leftCollarMat.color = new Color(0.18f, 0.28f, 0.42f);
+            if (leftCollarMat.HasProperty("_Smoothness")) leftCollarMat.SetFloat("_Smoothness", 0.9f);
+            leftCollar.GetComponent<MeshRenderer>().material = leftCollarMat;
+
+            // 7. Sağ Puzzle Ucu (Nükleotid Erkek Ucu & Geçmeli Kilit Pimi)
             GameObject rightPlug = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             rightPlug.name = "RightConnector";
             rightPlug.transform.SetParent(transform, false);
             rightPlug.transform.localPosition = new Vector3(1.38f, 0f, 0f);
             rightPlug.transform.localScale = new Vector3(0.38f, 0.38f, 0.38f);
             Destroy(rightPlug.GetComponent<Collider>());
-            var rightPlugMat = new Material(litShader);
+            rightPlugMat = new Material(litShader);
             rightPlugMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
             rightPlug.GetComponent<MeshRenderer>().material = rightPlugMat;
+
+            // Sağ Erkek Geçmeli Kilit Pimi (Male Puzzle Key Tab)
+            GameObject rightKey = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            rightKey.name = "RightPuzzleKey";
+            rightKey.transform.SetParent(transform, false);
+            rightKey.transform.localPosition = new Vector3(1.50f, 0f, 0f);
+            rightKey.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            rightKey.transform.localScale = new Vector3(0.24f, 0.14f, 0.24f);
+            Destroy(rightKey.GetComponent<Collider>());
+            rightKeyMat = new Material(litShader);
+            rightKeyMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
+            if (rightKeyMat.HasProperty("_Smoothness")) rightKeyMat.SetFloat("_Smoothness", 0.9f);
+            rightKey.GetComponent<MeshRenderer>().material = rightKeyMat;
 
             // 8. İç Parıltı Işığı
             GameObject lightObj = new GameObject("CoreLight");
@@ -323,6 +354,10 @@ namespace DNAPuzzle
             leftNucMesh.color = DNAHelper.GetNucleotideColor(Data.leftConnector);
             rightNucMesh.text = rightLetter;
             rightNucMesh.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
+
+            if (leftPlugMat != null) leftPlugMat.color = DNAHelper.GetNucleotideColor(Data.leftConnector);
+            if (rightPlugMat != null) rightPlugMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
+            if (rightKeyMat != null) rightKeyMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
 
             // 3. 4 Adet Watson-Crick Nükleotid Basamağını Yapılandır (Şemadaki gibi)
             NucleotideType[] topSeq = new NucleotideType[4];
@@ -676,6 +711,8 @@ namespace DNAPuzzle
 
         private void Update()
         {
+            if (IsBeingDragged) return;
+
             if (touchPulseTimer > 0f)
             {
                 touchPulseTimer = Mathf.Max(0f, touchPulseTimer - Time.deltaTime * 4f);
@@ -735,6 +772,23 @@ namespace DNAPuzzle
             {
                 coreLight.intensity = selected ? 2.8f : baseLightIntensity;
                 coreLight.range = selected ? 3.8f : 2.6f;
+            }
+        }
+
+        public void SetConnectorGlow(bool isLeft, bool glow, bool complementary)
+        {
+            if (Data == null) return;
+            Color baseCol = DNAHelper.GetNucleotideColor(isLeft ? Data.leftConnector : Data.rightConnector);
+            Color glowCol = complementary ? new Color(0.2f, 1f, 0.45f) : new Color(1f, 0.4f, 0.3f);
+            if (isLeft)
+            {
+                if (leftCollarMat != null) leftCollarMat.color = glow ? glowCol : new Color(0.18f, 0.28f, 0.42f);
+                if (leftPlugMat != null) leftPlugMat.color = glow ? glowCol : baseCol;
+            }
+            else
+            {
+                if (rightKeyMat != null) rightKeyMat.color = glow ? glowCol : baseCol;
+                if (rightPlugMat != null) rightPlugMat.color = glow ? glowCol : baseCol;
             }
         }
 

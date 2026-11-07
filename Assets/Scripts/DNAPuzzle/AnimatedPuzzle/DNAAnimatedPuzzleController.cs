@@ -50,6 +50,24 @@ namespace DNAPuzzle
         private int currentPlanetIdx = 0;
         private List<PlanetData> planets;
 
+        // Sürükle-Bırak Geçmeli Yapboz Mekaniği (Drag-and-Drop Interlocking System)
+        private AnimatedGenePiece dragCandidatePiece = null;
+        private AnimatedGenePiece draggedPiece = null;
+        private Vector2 dragPieceStartMousePos;
+        private Vector3 dragPieceOffset;
+        private bool isDraggingPiece = false;
+        private int snapTargetSlotIndex = -1;
+        private bool isSnapComplementary = false;
+        private string dragInterlockMessage = "";
+
+        private AnimatedRepairCandidate dragCandidateCand = null;
+        private AnimatedRepairCandidate draggedCandidate = null;
+        private Vector2 dragCandStartMousePos;
+        private bool isDraggingCandidate = false;
+        private AnimatedGenePiece candidateDropTargetGenome = null;
+
+        private LineRenderer snapGuideLine;
+
         private void Awake()
         {
             if (Instance == null) Instance = this;
@@ -81,6 +99,14 @@ namespace DNAPuzzle
             zoomedGenome = null;
             focusBackdropQuad = null;
             isRepairZoomMode = false;
+            draggedPiece = null;
+            dragCandidatePiece = null;
+            draggedCandidate = null;
+            dragCandidateCand = null;
+            isDraggingPiece = false;
+            isDraggingCandidate = false;
+            snapTargetSlotIndex = -1;
+            snapGuideLine = null;
             resonanceBeams.Clear();
             helixRibbon = null;
             backgroundChamber = null;
@@ -918,6 +944,7 @@ namespace DNAPuzzle
 
         public bool IsPointerOverHUD()
         {
+            if (isDraggingPiece || isDraggingCandidate) return false;
             if (showSynthesisModal) return true;
             Vector3 mp = DNAInput.MousePosition;
             float guiY = Screen.height - mp.y;
@@ -961,12 +988,205 @@ namespace DNAPuzzle
             return false;
         }
 
+        #region Sürükle-Bırak Geçmeli Yapboz Mekaniği & Yardımcıları
+        private LineRenderer GetOrCreateSnapGuideLine()
+        {
+            if (snapGuideLine == null)
+            {
+                var go = new GameObject("SnapGuideLine");
+                go.transform.SetParent(transform, false);
+                snapGuideLine = go.AddComponent<LineRenderer>();
+                snapGuideLine.positionCount = 2;
+                snapGuideLine.startWidth = 0.08f;
+                snapGuideLine.endWidth = 0.08f;
+                Shader s = Shader.Find("Universal Render Pipeline/Unlit");
+                if (s == null) s = Shader.Find("Sprites/Default");
+                snapGuideLine.material = new Material(s);
+                snapGuideLine.enabled = false;
+            }
+            return snapGuideLine;
+        }
+
+        private void ShowSnapGuide(Vector3 start, Vector3 end, bool complementary)
+        {
+            var lr = GetOrCreateSnapGuideLine();
+            lr.enabled = true;
+            Color col = complementary ? new Color(0.2f, 1f, 0.45f, 0.85f) : new Color(1f, 0.75f, 0.2f, 0.85f);
+            lr.material.color = col;
+            lr.SetPosition(0, start + new Vector3(0f, 0f, -0.2f));
+            lr.SetPosition(1, end + new Vector3(0f, 0f, -0.2f));
+        }
+
+        private void HideSnapGuide()
+        {
+            if (snapGuideLine != null) snapGuideLine.enabled = false;
+        }
+
+        private Vector3 GetMouseWorldPosition(float targetZ)
+        {
+            Camera cam = puzzleCamera != null ? puzzleCamera : Camera.main;
+            if (cam == null) return new Vector3(0f, 0f, targetZ);
+            Vector3 mp = DNAInput.MousePosition;
+            Plane plane = new Plane(Vector3.forward, new Vector3(0f, 0f, targetZ));
+            Ray ray = cam.ScreenPointToRay(mp);
+            if (plane.Raycast(ray, out float enter))
+            {
+                return ray.GetPoint(enter);
+            }
+            return new Vector3(0f, 0f, targetZ);
+        }
+
+        private void ResetAllConnectorGlows()
+        {
+            if (activeSlots != null)
+            {
+                for (int i = 0; i < activeSlots.Count; i++)
+                {
+                    var p = activeSlots[i]?.CurrentPiece;
+                    if (p != null)
+                    {
+                        p.SetConnectorGlow(true, false, false);
+                        p.SetConnectorGlow(false, false, false);
+                    }
+                }
+            }
+            if (draggedPiece != null)
+            {
+                draggedPiece.SetConnectorGlow(true, false, false);
+                draggedPiece.SetConnectorGlow(false, false, false);
+            }
+        }
+
+        private void DropPieceOnSlot(AnimatedGenePiece piece, int targetSlot)
+        {
+            if (piece == null || piece.Data == null || targetSlot < 0 || targetSlot >= activeSlots.Count) return;
+
+            // Onarılmamış bozuk genom kontrolü
+            if (!piece.Data.isRepaired && piece.Data.isBroken && !piece.Data.isDeformed)
+            {
+                piece.TriggerGlitchShake();
+                audioManager?.PlayMismatch();
+                repairFeedbackMessage = $"⚠️ {piece.Data.geneName} henüz onarılmadı! Önce eksik nükleotidi sürükleyip eşleştirin.";
+                if (piece.CurrentSlotIndex >= 0)
+                {
+                    activeSlots[piece.CurrentSlotIndex].PlacePiece(piece);
+                }
+                else
+                {
+                    ReturnPieceToPool(piece);
+                }
+                return;
+            }
+
+            int prevSlot = piece.CurrentSlotIndex;
+            var targetSlotObj = activeSlots[targetSlot];
+            var existingPiece = targetSlotObj.CurrentPiece;
+
+            if (existingPiece != null && existingPiece != piece)
+            {
+                if (prevSlot >= 0 && prevSlot < activeSlots.Count)
+                {
+                    // İki yuva arasında kusursuz yapboz yer değiştirmesi (SWAP)
+                    activeSlots[prevSlot].RemovePiece();
+                    targetSlotObj.RemovePiece();
+
+                    activeSlots[prevSlot].PlacePiece(existingPiece);
+                    manager.EquipGene(prevSlot, existingPiece.Data);
+
+                    targetSlotObj.PlacePiece(piece);
+                    manager.EquipGene(targetSlot, piece.Data);
+
+                    audioManager?.PlaySnap();
+                    repairFeedbackMessage = $"🔀 {piece.Data.geneName} ile {existingPiece.Data.geneName} yer değiştirdi!";
+                }
+                else
+                {
+                    // Tezgahtan dolu yuvaya sürüklendi: Eski parça tezgaha, yeni parça yuvaya kenetlenir
+                    targetSlotObj.RemovePiece();
+                    manager.RemoveGene(targetSlot);
+                    ReturnPieceToPool(existingPiece);
+
+                    targetSlotObj.PlacePiece(piece);
+                    manager.EquipGene(targetSlot, piece.Data);
+
+                    audioManager?.PlaySnap();
+                    repairFeedbackMessage = $"🔗 {piece.Data.geneName} yuva #{targetSlot + 1}'e kenetlendi! Önceki genom tezgaha alındı.";
+                }
+            }
+            else if (existingPiece == piece)
+            {
+                // Aynı yuvaya geri bırakıldı
+                targetSlotObj.PlacePiece(piece);
+            }
+            else
+            {
+                // Boş yuvaya doğrudan kenetlenme
+                if (prevSlot >= 0 && prevSlot < activeSlots.Count)
+                {
+                    activeSlots[prevSlot].RemovePiece();
+                    manager.RemoveGene(prevSlot);
+                }
+
+                targetSlotObj.PlacePiece(piece);
+                manager.EquipGene(targetSlot, piece.Data);
+
+                audioManager?.PlaySnap();
+                repairFeedbackMessage = $"🔗 {piece.Data.geneName} yuva #{targetSlot + 1}'e başarıyla kenetlendi!";
+            }
+
+            selectedSlot = targetSlot;
+            RefreshAllStates();
+        }
+
+        private void HandleCandidateDroppedOnGenome(AnimatedRepairCandidate candidate, AnimatedGenePiece targetGenome)
+        {
+            if (candidate == null || targetGenome == null || targetGenome.Data == null) return;
+
+            if (targetGenome.Data.isDeformed)
+            {
+                audioManager?.PlayMismatch();
+                repairFeedbackMessage = "☣️ GENOM YANDI! Yeni baz denemek için önce 'Genomu Arındır & Sıfırla' butonuna tıklayın.";
+                return;
+            }
+
+            bool success = targetGenome.TryRepairWith(candidate.Nucleotide);
+            if (success)
+            {
+                candidate.TriggerClickPulse();
+                audioManager?.PlayResonance();
+                audioManager?.PlaySnap();
+                repairFeedbackMessage = $"✨ HARİKA GEÇME! {targetGenome.Data.geneName} ({candidate.Nucleotide}) ile başarıyla onarıldı! Şimdi sarmala sürükleyebilirsin.";
+
+                var nextBroken = poolPieces.Find(p => p != null && !p.IsEquipped && p.Data != null && p.Data.isBroken && !p.Data.isRepaired && !p.Data.isDeformed);
+                if (nextBroken != null)
+                {
+                    SelectGenomeForRepair(nextBroken);
+                }
+            }
+            else
+            {
+                candidate.TriggerErrorShake();
+                if (targetGenome.Data.isDeformed)
+                {
+                    audioManager?.PlayBurnout();
+                    repairFeedbackMessage = $"💥 AŞIRI YÜKLENME! 3 hak tükendi ve {targetGenome.Data.geneName} yandı!";
+                }
+                else
+                {
+                    audioManager?.PlayMismatch();
+                    repairFeedbackMessage = $"❌ UYUMSUZ BAZ! Kalan Onarım Hakkı: {targetGenome.Data.remainingRepairAttempts}/3. {targetGenome.Data.repairHint}";
+                }
+            }
+
+            RefreshAllStates();
+        }
+        #endregion
+
         private void Update()
         {
             EnsurePuzzleInitialized();
             if (isSimulating || showSynthesisModal) return;
 
-            // Unity 6 New Input System ile tam uyumlu 3D Fare Raycast etkileşimi
             Camera cam = puzzleCamera != null ? puzzleCamera : Camera.main;
             if (cam == null) return;
 
@@ -1004,21 +1224,24 @@ namespace DNAPuzzle
             }
 
             // Fare Hover Durumu
-            if (hitCandidate != hoveredCandidate)
+            if (!isDraggingPiece && !isDraggingCandidate)
             {
-                if (hoveredCandidate != null) hoveredCandidate.SetHovered(false);
-                hoveredCandidate = hitCandidate;
-                if (hoveredCandidate != null) hoveredCandidate.SetHovered(true);
+                if (hitCandidate != hoveredCandidate)
+                {
+                    if (hoveredCandidate != null) hoveredCandidate.SetHovered(false);
+                    hoveredCandidate = hitCandidate;
+                    if (hoveredCandidate != null) hoveredCandidate.SetHovered(true);
+                }
+
+                if (hitPiece != hoveredGenePiece)
+                {
+                    if (hoveredGenePiece != null) hoveredGenePiece.SetHovered(false);
+                    hoveredGenePiece = hitPiece;
+                    if (hoveredGenePiece != null) hoveredGenePiece.SetHovered(true);
+                }
             }
 
-            if (hitPiece != hoveredGenePiece)
-            {
-                if (hoveredGenePiece != null) hoveredGenePiece.SetHovered(false);
-                hoveredGenePiece = hitPiece;
-                if (hoveredGenePiece != null) hoveredGenePiece.SetHovered(true);
-            }
-
-            // Fare Sol Tıklama
+            // 1. FARE BASILDIĞINDA (GetMouseButtonDown)
             if (!overHud && DNAInput.GetMouseButtonDown(0))
             {
                 if (hitChamberIdx >= 0)
@@ -1035,16 +1258,276 @@ namespace DNAPuzzle
                 }
                 else if (hitCandidate != null)
                 {
-                    HandleCandidateClicked(hitCandidate);
+                    dragCandidateCand = hitCandidate;
+                    dragCandStartMousePos = DNAInput.MousePosition;
+                    isDraggingCandidate = false;
                 }
                 else if (hitPiece != null)
                 {
-                    hitPiece.TriggerTouchPulse();
-                    HandlePieceClicked(hitPiece);
+                    dragCandidatePiece = hitPiece;
+                    dragPieceStartMousePos = DNAInput.MousePosition;
+                    isDraggingPiece = false;
+                    snapTargetSlotIndex = -1;
                 }
                 else if (hitSlot != null)
                 {
                     HandleSlotClicked(hitSlot.SlotIndex);
+                }
+            }
+
+            // 2. FARE BASILI TUTULDUĞUNDA (GetMouseButton - Sürükleme Mantığı)
+            if (DNAInput.GetMouseButton(0))
+            {
+                // A) GENOM PARÇASI SÜRÜKLEME
+                if (dragCandidatePiece != null)
+                {
+                    float mouseMovedDist = Vector2.Distance(DNAInput.MousePosition, dragPieceStartMousePos);
+                    if (!isDraggingPiece && mouseMovedDist > 6f)
+                    {
+                        isDraggingPiece = true;
+                        draggedPiece = dragCandidatePiece;
+                        draggedPiece.IsBeingDragged = true;
+                        draggedPiece.TriggerTouchPulse();
+                        audioManager?.PlaySnap();
+
+                        Vector3 mWorld = GetMouseWorldPosition(draggedPiece.transform.position.z);
+                        dragPieceOffset = draggedPiece.transform.position - mWorld;
+                    }
+
+                    if (isDraggingPiece && draggedPiece != null)
+                    {
+                        Vector3 mWorld = GetMouseWorldPosition(0f);
+                        Vector3 targetWorld = mWorld + dragPieceOffset;
+                        targetWorld.z = -0.72f;
+
+                        draggedPiece.transform.position = Vector3.Lerp(draggedPiece.transform.position, targetWorld, Time.deltaTime * 32f);
+
+                        // Dinamik fiziksel yapboz eğilme açısı
+                        float deltaX = DNAInput.MousePosition.x - dragPieceStartMousePos.x;
+                        float tiltZ = Mathf.Clamp(-deltaX * 0.04f, -12f, 12f);
+                        draggedPiece.transform.rotation = Quaternion.Lerp(draggedPiece.transform.rotation, Quaternion.Euler(0f, 0f, tiltZ), Time.deltaTime * 14f);
+                        draggedPiece.transform.localScale = Vector3.Lerp(draggedPiece.transform.localScale, Vector3.one * 1.05f, Time.deltaTime * 16f);
+
+                        // En yakın yuvaya manyetik kenetlenme kontrolü
+                        int closestSlot = -1;
+                        float minDist = 2.15f;
+                        for (int i = 0; i < activeSlots.Count; i++)
+                        {
+                            if (activeSlots[i] == null) continue;
+                            float d = Vector2.Distance(new Vector2(targetWorld.x, targetWorld.y), new Vector2(activeSlots[i].transform.position.x, activeSlots[i].transform.position.y));
+                            if (d < minDist)
+                            {
+                                minDist = d;
+                                closestSlot = i;
+                            }
+                        }
+
+                        if (closestSlot != snapTargetSlotIndex)
+                        {
+                            if (snapTargetSlotIndex >= 0 && snapTargetSlotIndex < activeSlots.Count && activeSlots[snapTargetSlotIndex] != null)
+                            {
+                                activeSlots[snapTargetSlotIndex].SetSnapHighlight(false, false);
+                            }
+                            snapTargetSlotIndex = closestSlot;
+                        }
+
+                        if (snapTargetSlotIndex >= 0 && snapTargetSlotIndex < activeSlots.Count)
+                        {
+                            var targetSlot = activeSlots[snapTargetSlotIndex];
+                            bool comp = false;
+                            string matchDetails = "";
+
+                            ResetAllConnectorGlows();
+
+                            // Sol komşu ile kenetlenme kontrolü
+                            if (snapTargetSlotIndex > 0)
+                            {
+                                var leftPiece = activeSlots[snapTargetSlotIndex - 1].CurrentPiece;
+                                if (leftPiece != null && leftPiece != draggedPiece && leftPiece.Data != null && draggedPiece.Data != null)
+                                {
+                                    bool isMatch = DNAHelper.IsComplementary(leftPiece.Data.rightConnector, draggedPiece.Data.leftConnector);
+                                    if (isMatch) comp = true;
+                                    matchDetails += $"Sol: [{leftPiece.Data.rightConnector} ⟷ {draggedPiece.Data.leftConnector} {(isMatch ? "✓ UYUMLU" : "✕")}] ";
+                                    leftPiece.SetConnectorGlow(false, true, isMatch);
+                                    draggedPiece.SetConnectorGlow(true, true, isMatch);
+                                }
+                            }
+                            // Sağ komşu ile kenetlenme kontrolü
+                            if (snapTargetSlotIndex < activeSlots.Count - 1)
+                            {
+                                var rightPiece = activeSlots[snapTargetSlotIndex + 1].CurrentPiece;
+                                if (rightPiece != null && rightPiece != draggedPiece && rightPiece.Data != null && draggedPiece.Data != null)
+                                {
+                                    bool isMatch = DNAHelper.IsComplementary(draggedPiece.Data.rightConnector, rightPiece.Data.leftConnector);
+                                    if (isMatch) comp = true;
+                                    matchDetails += $"Sağ: [{draggedPiece.Data.rightConnector} ⟷ {rightPiece.Data.leftConnector} {(isMatch ? "✓ UYUMLU" : "✕")}] ";
+                                    rightPiece.SetConnectorGlow(true, true, isMatch);
+                                    draggedPiece.SetConnectorGlow(false, true, isMatch);
+                                }
+                            }
+
+                            isSnapComplementary = comp;
+                            targetSlot.SetSnapHighlight(true, isSnapComplementary);
+                            ShowSnapGuide(draggedPiece.transform.position, targetSlot.transform.position, isSnapComplementary);
+
+                            var existingPiece = targetSlot.CurrentPiece;
+                            if (existingPiece != null && existingPiece != draggedPiece)
+                            {
+                                dragInterlockMessage = $"🔀 Yuva #{snapTargetSlotIndex + 1} ({existingPiece.Data.geneName}) ile Değiş-Tokuş Yap! {matchDetails}";
+                            }
+                            else
+                            {
+                                dragInterlockMessage = $"🧩 Yuva #{snapTargetSlotIndex + 1}'e Kenetle! {matchDetails}";
+                            }
+                        }
+                        else
+                        {
+                            ResetAllConnectorGlows();
+                            HideSnapGuide();
+                            dragInterlockMessage = "";
+                        }
+                    }
+                }
+
+                // B) NÜKLEOTİD ONARIM KAPSÜLÜ SÜRÜKLEME
+                if (dragCandidateCand != null)
+                {
+                    float mouseMovedDist = Vector2.Distance(DNAInput.MousePosition, dragCandStartMousePos);
+                    if (!isDraggingCandidate && mouseMovedDist > 6f)
+                    {
+                        isDraggingCandidate = true;
+                        draggedCandidate = dragCandidateCand;
+                        draggedCandidate.IsBeingDragged = true;
+                        audioManager?.PlaySnap();
+                    }
+
+                    if (isDraggingCandidate && draggedCandidate != null)
+                    {
+                        Vector3 mWorld = GetMouseWorldPosition(0f);
+                        draggedCandidate.transform.position = Vector3.Lerp(draggedCandidate.transform.position, mWorld + new Vector3(0f, 0f, -0.65f), Time.deltaTime * 32f);
+                        draggedCandidate.transform.localScale = Vector3.Lerp(draggedCandidate.transform.localScale, Vector3.one * 1.30f, Time.deltaTime * 16f);
+
+                        // Bozuk genom üzerine gelindi mi?
+                        AnimatedGenePiece targetGene = null;
+                        float minGeneDist = 2.4f;
+                        if (isRepairZoomMode && zoomedGenome != null)
+                        {
+                            float d = Vector2.Distance(new Vector2(mWorld.x, mWorld.y), new Vector2(zoomedGenome.transform.position.x, zoomedGenome.transform.position.y));
+                            if (d < 3.8f) targetGene = zoomedGenome;
+                        }
+                        else
+                        {
+                            foreach (var p in poolPieces)
+                            {
+                                if (p == null || !p.gameObject.activeInHierarchy || p.Data == null) continue;
+                                float d = Vector2.Distance(new Vector2(mWorld.x, mWorld.y), new Vector2(p.transform.position.x, p.transform.position.y));
+                                if (d < minGeneDist)
+                                {
+                                    minGeneDist = d;
+                                    targetGene = p;
+                                }
+                            }
+                        }
+
+                        if (targetGene != null && targetGene.Data != null)
+                        {
+                            candidateDropTargetGenome = targetGene;
+                            dragInterlockMessage = $"🧬 [{draggedCandidate.Nucleotide}] Bazını {targetGene.Data.geneName} Genomuna Yerleştirmek İçin Bırakın!";
+                            ShowSnapGuide(draggedCandidate.transform.position, targetGene.transform.position, true);
+                        }
+                        else
+                        {
+                            candidateDropTargetGenome = null;
+                            HideSnapGuide();
+                            dragInterlockMessage = "";
+                        }
+                    }
+                }
+            }
+
+            // 3. FARE BIRAKILDIĞINDA (GetMouseButtonUp)
+            if (DNAInput.GetMouseButtonUp(0))
+            {
+                // A) GENOM PARÇASI BIRAKILDI
+                if (isDraggingPiece && draggedPiece != null)
+                {
+                    isDraggingPiece = false;
+                    draggedPiece.IsBeingDragged = false;
+                    draggedPiece.transform.rotation = Quaternion.identity;
+                    ResetAllConnectorGlows();
+                    HideSnapGuide();
+
+                    if (snapTargetSlotIndex >= 0 && snapTargetSlotIndex < activeSlots.Count)
+                    {
+                        activeSlots[snapTargetSlotIndex].SetSnapHighlight(false, false);
+                        DropPieceOnSlot(draggedPiece, snapTargetSlotIndex);
+                    }
+                    else
+                    {
+                        // Boş alana bırakıldı
+                        if (draggedPiece.CurrentSlotIndex >= 0)
+                        {
+                            // Eğer sarmaldan aşağı tezgaha sürüklendiyse sarmaldan çıkar
+                            if (draggedPiece.transform.position.y < 0.2f)
+                            {
+                                int sIdx = draggedPiece.CurrentSlotIndex;
+                                activeSlots[sIdx].RemovePiece();
+                                manager.RemoveGene(sIdx);
+                                ReturnPieceToPool(draggedPiece);
+                                audioManager?.PlaySnap();
+                                repairFeedbackMessage = $"↩️ {draggedPiece.Data.geneName} sarmaldan çıkarıldı ve tezgaha alındı.";
+                                RefreshAllStates();
+                            }
+                            else
+                            {
+                                activeSlots[draggedPiece.CurrentSlotIndex].PlacePiece(draggedPiece);
+                            }
+                        }
+                        else
+                        {
+                            ReturnPieceToPool(draggedPiece);
+                        }
+                    }
+
+                    draggedPiece = null;
+                    dragCandidatePiece = null;
+                    snapTargetSlotIndex = -1;
+                    dragInterlockMessage = "";
+                }
+                else if (!isDraggingPiece && dragCandidatePiece != null)
+                {
+                    // Kısa temiz tıklama
+                    dragCandidatePiece.TriggerTouchPulse();
+                    HandlePieceClicked(dragCandidatePiece);
+                    dragCandidatePiece = null;
+                }
+
+                // B) NÜKLEOTİD ONARIM KAPSÜLÜ BIRAKILDI
+                if (isDraggingCandidate && draggedCandidate != null)
+                {
+                    isDraggingCandidate = false;
+                    draggedCandidate.IsBeingDragged = false;
+                    HideSnapGuide();
+
+                    if (candidateDropTargetGenome != null)
+                    {
+                        HandleCandidateDroppedOnGenome(draggedCandidate, candidateDropTargetGenome);
+                    }
+                    else
+                    {
+                        draggedCandidate.SetBasePosition(draggedCandidate.transform.position, Vector3.one);
+                    }
+
+                    draggedCandidate = null;
+                    dragCandidateCand = null;
+                    candidateDropTargetGenome = null;
+                    dragInterlockMessage = "";
+                }
+                else if (!isDraggingCandidate && dragCandidateCand != null)
+                {
+                    // Kısa temiz tıklama
+                    HandleCandidateClicked(dragCandidateCand);
+                    dragCandidateCand = null;
                 }
             }
         }
@@ -1371,6 +1854,22 @@ namespace DNAPuzzle
                 ClearStrand();
             }
 
+            // Sürükle-Bırak Manyetik Geçmeli Yapboz Bilgilendirme Kartı (Interlocking HUD Banner)
+            if (!string.IsNullOrEmpty(dragInterlockMessage))
+            {
+                float bannerW = Mathf.Min(740f, screenW - 40f);
+                float bannerH = 34f;
+                float bx = (screenW - bannerW) * 0.5f;
+                float by = screenH - 128f;
+
+                GUI.color = isSnapComplementary ? new Color(0.04f, 0.22f, 0.14f, 0.95f) : new Color(0.08f, 0.14f, 0.24f, 0.95f);
+                GUI.Box(new Rect(bx, by, bannerW, bannerH), GUIContent.none, EditorBox());
+
+                GUI.color = isSnapComplementary ? new Color(0.25f, 1f, 0.5f) : new Color(1f, 0.88f, 0.35f);
+                GUI.Label(new Rect(bx + 12, by + 6, bannerW - 24, 24), dragInterlockMessage, EditorBold(12));
+                GUI.color = Color.white;
+            }
+
             // Canlı Sentez ve Modelleme Sonuç Modalı
             if (showSynthesisModal && lastSynthesizedCreature != null && lastSynthesizedCreature.isValid && lastSynthesizedCreature.phenotype != null)
             {
@@ -1683,6 +2182,21 @@ namespace DNAPuzzle
                 string hearts = "";
                 for (int h = 0; h < data.maxRepairAttempts; h++) hearts += (h < data.remainingRepairAttempts) ? "❤️" : "🖤";
                 GUI.Label(new Rect(hintX, screenH - 42f, hintW, 24), $"▼ ALTTAN DOĞRU BAZ KAPSÜLÜNE TIKLAYARAK GENOMU ONARIN | Kalan Hak: {hearts} ({data.remainingRepairAttempts}/3) ▼", EditorBold(11));
+                GUI.color = Color.white;
+            }
+
+            if (!string.IsNullOrEmpty(dragInterlockMessage))
+            {
+                float bannerW = Mathf.Min(740f, screenW - 40f);
+                float bannerH = 34f;
+                float bx = (screenW - bannerW) * 0.5f;
+                float by = screenH - 110f;
+
+                GUI.color = new Color(0.04f, 0.22f, 0.14f, 0.95f);
+                GUI.Box(new Rect(bx, by, bannerW, bannerH), GUIContent.none, EditorBox());
+
+                GUI.color = new Color(0.25f, 1f, 0.5f);
+                GUI.Label(new Rect(bx + 12, by + 6, bannerW - 24, 24), dragInterlockMessage, EditorBold(12));
                 GUI.color = Color.white;
             }
 

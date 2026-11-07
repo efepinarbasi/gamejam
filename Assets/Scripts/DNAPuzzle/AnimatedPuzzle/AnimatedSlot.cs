@@ -21,6 +21,8 @@ namespace DNAPuzzle
         private float pulseTimer;
         private float dockPulse = 0f;
         private Vector3 baseScale = Vector3.one * 0.95f;
+        private bool isSnapHighlighted = false;
+        private bool isSnapComplementary = false;
 
         public event Action<int> OnSlotClicked;
 
@@ -150,7 +152,20 @@ namespace DNAPuzzle
             }
             else
             {
-                transform.localScale = Vector3.Lerp(transform.localScale, baseScale, Time.deltaTime * 10f);
+                Vector3 targetS = isSnapHighlighted ? baseScale * 1.08f : baseScale;
+                transform.localScale = Vector3.Lerp(transform.localScale, targetS, Time.deltaTime * 10f);
+            }
+
+            if (indexTextMesh != null)
+            {
+                if (isSnapHighlighted)
+                {
+                    indexTextMesh.color = isSnapComplementary ? new Color(0.2f, 1f, 0.45f) : new Color(1f, 0.85f, 0.3f);
+                }
+                else
+                {
+                    indexTextMesh.color = new Color(0.35f, 0.9f, 1f);
+                }
             }
 
             if (!IsOccupied)
@@ -163,10 +178,13 @@ namespace DNAPuzzle
                 }
 
                 float pulse = 0.6f + Mathf.Sin(pulseTimer) * 0.3f;
-                if (slotLight != null) slotLight.intensity = 0.8f + pulse * 0.6f;
+                if (slotLight != null && !isSnapHighlighted) slotLight.intensity = 0.8f + pulse * 0.6f;
                 if (holoHelixMaterial != null)
                 {
-                    holoHelixMaterial.color = new Color(0.15f, 0.75f, 1f, 0.3f + pulse * 0.35f);
+                    Color holoCol = isSnapHighlighted ? 
+                        (isSnapComplementary ? new Color(0.2f, 1f, 0.45f, 0.75f) : new Color(1f, 0.85f, 0.3f, 0.75f)) :
+                        new Color(0.15f, 0.75f, 1f, 0.3f + pulse * 0.35f);
+                    holoHelixMaterial.color = holoCol;
                 }
             }
             else
@@ -176,7 +194,32 @@ namespace DNAPuzzle
                 {
                     holoHelixCore.gameObject.SetActive(false);
                 }
-                if (slotLight != null) slotLight.intensity = 0.5f + dockPulse * 1.5f;
+                if (slotLight != null && !isSnapHighlighted) slotLight.intensity = 0.5f + dockPulse * 1.5f;
+            }
+        }
+
+        public void SetSnapHighlight(bool highlight, bool complementary)
+        {
+            isSnapHighlighted = highlight;
+            isSnapComplementary = complementary;
+            if (highlight)
+            {
+                dockPulse = 0.4f;
+                if (slotLight != null)
+                {
+                    slotLight.color = complementary ? new Color(0.2f, 1f, 0.45f) : new Color(1f, 0.85f, 0.3f);
+                    slotLight.range = 3.6f;
+                    slotLight.intensity = 2.4f;
+                }
+            }
+            else
+            {
+                if (slotLight != null)
+                {
+                    slotLight.color = new Color(0.2f, 0.8f, 1f);
+                    slotLight.range = 2.8f;
+                    slotLight.intensity = 1.1f;
+                }
             }
         }
 

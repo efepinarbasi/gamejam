@@ -13,6 +13,7 @@ namespace DNAPuzzle
         public NucleotideType Nucleotide { get; private set; }
         public int CandidateIndex { get; private set; }
         public bool IsUsed { get; private set; } = false;
+        public bool IsBeingDragged { get; set; } = false;
 
         private Material baseMat;
         private Material coreMat;
@@ -217,6 +218,8 @@ namespace DNAPuzzle
 
         private void Update()
         {
+            if (IsBeingDragged) return;
+
             // Hover süzülme animasyonu
             float floatY = Mathf.Sin(Time.time * 2.5f + hoverPhase) * (isHovered ? 0.08f : 0.04f);
             Vector3 hoverTarget = basePosition + new Vector3(0f, floatY, isHovered ? -0.25f : 0f);

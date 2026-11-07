@@ -59,11 +59,32 @@ namespace DNAPuzzle
             {
                 if (button == 0) return Mouse.current.leftButton.isPressed;
                 if (button == 1) return Mouse.current.rightButton.isPressed;
+                if (button == 2) return Mouse.current.middleButton.isPressed;
             }
 #endif
             try
             {
                 return Input.GetMouseButton(button);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool GetMouseButtonUp(int button)
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Mouse.current != null)
+            {
+                if (button == 0) return Mouse.current.leftButton.wasReleasedThisFrame;
+                if (button == 1) return Mouse.current.rightButton.wasReleasedThisFrame;
+                if (button == 2) return Mouse.current.middleButton.wasReleasedThisFrame;
+            }
+#endif
+            try
+            {
+                return Input.GetMouseButtonUp(button);
             }
             catch
             {
