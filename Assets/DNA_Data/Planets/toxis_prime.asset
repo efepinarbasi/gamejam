@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7686bdde6db42b45bd7774dab9db303, type: 3}
+  m_Name: toxis_prime
+  m_EditorClassIdentifier: Assembly-CSharp::DNAPuzzle.PlanetData
+  planetId: toxis_prime
+  planetName: Toxis-Prime (Asit & Radyasyon)
+  description: "\xD6l\xFCmc\xFCl asit ya\u011Fmurlar\u0131 ve gama radyasyonu."
+  themeColor: {r: 0.45, g: 0.95, b: 0.25, a: 1}
+  planetIcon: {fileID: 0}
+  strandSlotCount: 5
+  maxEnergyBudget: 13
+  maxAllowedInstability: 2
+  requirements:
+  - stat: 3
+    requiredValue: 5
+  - stat: 2
+    requiredValue: 4
+  - stat: 4
+    requiredValue: 1

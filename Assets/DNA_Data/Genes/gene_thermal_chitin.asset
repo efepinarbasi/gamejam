@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc4c228afe83013469d4a5dc9af7f4f6, type: 3}
+  m_Name: gene_thermal_chitin
+  m_EditorClassIdentifier: Assembly-CSharp::DNAPuzzle.GeneData
+  geneId: gene_thermal_chitin
+  geneName: Termal Kitin
+  description: "Lav dayan\u0131kl\u0131 volkanik kabuk."
+  icon: {fileID: 0}
+  customColor: {r: 1, g: 0.42, b: 0.12, a: 1}
+  category: 1
+  rarity: 0
+  leftConnector: 0
+  rightConnector: 3
+  energyCost: 3
+  statModifiers:
+  - stat: 0
+    value: 3
+  - stat: 4
+    value: 1

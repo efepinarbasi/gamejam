@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc4c228afe83013469d4a5dc9af7f4f6, type: 3}
+  m_Name: gene_resonant_catalyst
+  m_EditorClassIdentifier: Assembly-CSharp::DNAPuzzle.GeneData
+  geneId: gene_resonant_catalyst
+  geneName: Kozmik Heliks
+  description: "Evrensel sa\u011F u\xE7lu h\u0131zland\u0131r\u0131c\u0131."
+  icon: {fileID: 0}
+  customColor: {r: 1, g: 0.3, b: 0.65, a: 1}
+  category: 6
+  rarity: 2
+  leftConnector: 0
+  rightConnector: 4
+  energyCost: 3
+  statModifiers:
+  - stat: 2
+    value: 3
+  - stat: 1
+    value: 2
