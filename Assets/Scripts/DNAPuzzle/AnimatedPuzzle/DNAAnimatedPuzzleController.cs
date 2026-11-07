@@ -106,7 +106,7 @@ namespace DNAPuzzle
             transform.position = new Vector3(0f, -120f, 0f);
 
             // Lab odasındaki ekran istasyonlarını tespit et
-            foreach (var st in Object.FindObjectsByType<ScreenStation>(FindObjectsSortMode.None))
+            foreach (var st in Object.FindObjectsByType<ScreenStation>())
             {
                 if (st == null) continue;
                 if (st.gameObject.name == "FirstScreen") monitorStation = st;
@@ -363,11 +363,13 @@ namespace DNAPuzzle
             var ren = coreGo.GetComponent<Renderer>();
 
             Color coreColor = new Color(0.2f, 0.9f, 1f);
-            if (creature.planet != null)
+            if (creature.targetPlanet != null)
             {
-                if (creature.planet.planetType == PlanetType.Pyros_9) coreColor = new Color(1f, 0.45f, 0.1f);
-                else if (creature.planet.planetType == PlanetType.Cryo_Kore) coreColor = new Color(0.15f, 0.85f, 1f);
-                else if (creature.planet.planetType == PlanetType.Toxis_Prime) coreColor = new Color(0.35f, 1f, 0.2f);
+                coreColor = creature.targetPlanet.themeColor;
+            }
+            else if (creature.phenotype != null && creature.phenotype.glowColor.a > 0.05f)
+            {
+                coreColor = creature.phenotype.glowColor;
             }
             ren.material = CreateHoloMaterial(coreColor, false);
 
@@ -390,9 +392,10 @@ namespace DNAPuzzle
             pl.intensity = 3.5f;
 
             // 4. Numune Bilgi Tabelası (Plaque)
-            string specName = creature.phenotype != null ? creature.phenotype.organismName : "Biyo-Organizması";
+            string specName = !string.IsNullOrEmpty(creature.speciesName) ? creature.speciesName : "Biyo-Organizması";
+            int stars = (lastEvaluation != null) ? Mathf.Max(1, lastEvaluation.starRating) : 3;
             CreateTextMeshOn(labChamberCreature.transform, "SpecimenPlaque",
-                $"🔬 DENEYSEL CANLI: {specName}\n[ Kararlılık: %{creature.totalScore:F0} • Yaşam: AKTİF ]",
+                $"🔬 DENEYSEL CANLI: {specName}\n[ Derece: {stars} Yıldız • Yaşam: AKTİF ]",
                 new Vector3(0f, 1.6f, 0f), 0.035f, 96, Color.white);
         }
 
@@ -616,7 +619,7 @@ namespace DNAPuzzle
             RenderSettings.ambientLight = new Color(0.2f, 0.28f, 0.42f);
 
             Light dirLight = null;
-            foreach (var l in FindObjectsByType<Light>(FindObjectsSortMode.None))
+            foreach (var l in FindObjectsByType<Light>())
             {
                 if (l != null && l.type == LightType.Directional)
                 {
