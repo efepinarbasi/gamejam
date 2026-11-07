@@ -30,6 +30,10 @@ public class CameraStationController : MonoBehaviour
 
     public State CurrentState { get; private set; } = State.AtBase;
     public ScreenStation ActiveStation { get; private set; }
+    public float MoveProgress { get; private set; } = 0f;
+    public Vector3 BasePosition => _basePos;
+    public Quaternion BaseRotation => _baseRot;
+    public float BaseFov => _baseFov;
 
     /// <summary>
     /// Terminal içi alt menü veya modal açıkken ESC/Sağ tıkın Base'e dönmesini engellemek için geri çağırım.
@@ -151,6 +155,7 @@ public class CameraStationController : MonoBehaviour
             // Masaya yaklaşırken doğal kamera kavisi ve hafif odaklanma baş eğimi
             float arc = Mathf.Sin(rawT * Mathf.PI) * 0.09f;
             Quaternion tilt = Quaternion.Euler(Mathf.Sin(rawT * Mathf.PI) * 1.4f, 0f, 0f);
+            MoveProgress = (endState == State.AtStation) ? k : (1f - k);
             t.position = Vector3.LerpUnclamped(fromPos, toPos, k) + Vector3.up * arc;
             t.rotation = Quaternion.SlerpUnclamped(fromRot, toRot, k) * tilt;
             cam.fieldOfView = Mathf.LerpUnclamped(fromFov, toFov, k);
@@ -160,6 +165,7 @@ public class CameraStationController : MonoBehaviour
         t.SetPositionAndRotation(toPos, toRot);
         cam.fieldOfView = toFov;
         CurrentState = endState;
+        MoveProgress = (endState == State.AtStation) ? 1f : 0f;
 
         if (arrived != null)
         {
