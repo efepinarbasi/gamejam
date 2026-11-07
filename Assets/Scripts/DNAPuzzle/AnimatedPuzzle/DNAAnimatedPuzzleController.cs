@@ -525,8 +525,13 @@ namespace DNAPuzzle
             foreach (var b in resonanceBeams) if (b != null) b.gameObject.SetActive(false);
 
             // Seçilen genomu tam merkeze dengeli bir boyutta getir (Önce hedef ölçeği ata, sonra hareketi başlat)
+            isDraggingPiece = false;
+            draggedPiece = null;
+            dragCandidatePiece = null;
+            snapTargetSlotIndex = -1;
+
             Vector3 centerPos = new Vector3(0f, 0.72f, -1.8f);
-            zoomedGenome.SetTargetScale(Vector3.one * 1.55f);
+            zoomedGenome.SetTargetScale(Vector3.one * 1.65f);
             zoomedGenome.MoveTo(centerPos, Quaternion.identity, 0.40f);
 
             // Alttaki onarım parçalarını odak moduna taşı
@@ -1264,10 +1269,19 @@ namespace DNAPuzzle
                 }
                 else if (hitPiece != null)
                 {
-                    dragCandidatePiece = hitPiece;
-                    dragPieceStartMousePos = DNAInput.MousePosition;
-                    isDraggingPiece = false;
-                    snapTargetSlotIndex = -1;
+                    if (isRepairZoomMode)
+                    {
+                        // Odak / Laboratuvar modunda genom sürüklenip tezgaha düşürülmez veya küçültülmez!
+                        hitPiece.TriggerTouchPulse();
+                        HandlePieceClicked(hitPiece);
+                    }
+                    else
+                    {
+                        dragCandidatePiece = hitPiece;
+                        dragPieceStartMousePos = DNAInput.MousePosition;
+                        isDraggingPiece = false;
+                        snapTargetSlotIndex = -1;
+                    }
                 }
                 else if (hitSlot != null)
                 {
@@ -1278,8 +1292,8 @@ namespace DNAPuzzle
             // 2. FARE BASILI TUTULDUĞUNDA (GetMouseButton - Sürükleme Mantığı)
             if (DNAInput.GetMouseButton(0))
             {
-                // A) GENOM PARÇASI SÜRÜKLEME
-                if (dragCandidatePiece != null)
+                // A) GENOM PARÇASI SÜRÜKLEME (Odak modunda devre dışı)
+                if (dragCandidatePiece != null && !isRepairZoomMode)
                 {
                     float mouseMovedDist = Vector2.Distance(DNAInput.MousePosition, dragPieceStartMousePos);
                     if (!isDraggingPiece && mouseMovedDist > 6f)
@@ -1496,9 +1510,11 @@ namespace DNAPuzzle
                 }
                 else if (!isDraggingPiece && dragCandidatePiece != null)
                 {
-                    // Kısa temiz tıklama
-                    dragCandidatePiece.TriggerTouchPulse();
-                    HandlePieceClicked(dragCandidatePiece);
+                    if (!isRepairZoomMode)
+                    {
+                        dragCandidatePiece.TriggerTouchPulse();
+                        HandlePieceClicked(dragCandidatePiece);
+                    }
                     dragCandidatePiece = null;
                 }
 
@@ -1512,10 +1528,6 @@ namespace DNAPuzzle
                     if (candidateDropTargetGenome != null)
                     {
                         HandleCandidateDroppedOnGenome(draggedCandidate, candidateDropTargetGenome);
-                    }
-                    else
-                    {
-                        draggedCandidate.SetBasePosition(draggedCandidate.transform.position, Vector3.one);
                     }
 
                     draggedCandidate = null;
