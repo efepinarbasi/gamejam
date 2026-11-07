@@ -269,8 +269,8 @@ namespace DNAPuzzle
             leftNucMesh = CreateTextMesh("LeftNuc", new Vector3(-1.38f, 0f, -0.22f), 0.028f, 96, Color.white, FontStyle.Bold);
             rightNucMesh = CreateTextMesh("RightNuc", new Vector3(1.38f, 0f, -0.22f), 0.028f, 96, Color.white, FontStyle.Bold);
 
-            // 11. Durum Rozeti (⚠️ BOZUK GENOM / ✅ ONARILDI) - Üstteki yuvaya çarpmaması için y=0.85f'e çekildi
-            statusBadgeMesh = CreateTextMesh("StatusBadge", new Vector3(0f, 0.85f, -0.20f), 0.020f, 84, new Color(1f, 0.4f, 0.2f), FontStyle.Bold);
+            // 11. Durum Rozeti (⚠️ BOZUK GENOM / ✅ ONARILDI) - Üst nükleotid harflerine basmaması için y=1.22f'ye alındı
+            statusBadgeMesh = CreateTextMesh("StatusBadge", new Vector3(0f, 1.22f, -0.20f), 0.020f, 84, new Color(1f, 0.4f, 0.2f), FontStyle.Bold);
         }
 
         private GameObject CreateRailSegment(Vector3 p1, Vector3 p2, float radius, Material mat, string name)
@@ -562,7 +562,8 @@ namespace DNAPuzzle
         public void SetZoomedInRepairLab(bool zoomed)
         {
             isZoomedInLab = zoomed;
-            float plaqueY = zoomed ? -1.06f : 0f;
+            // Odak modunda plaket alt nükleotid ve soru işaretlerine basmaması için -1.42f seviyesine indirildi
+            float plaqueY = zoomed ? -1.42f : 0f;
             if (centerPlaqueTrans != null)
                 centerPlaqueTrans.localPosition = new Vector3(0f, plaqueY, -0.15f);
             if (borderPlaqueTrans != null)
@@ -571,6 +572,12 @@ namespace DNAPuzzle
                 nameTextMesh.transform.localPosition = new Vector3(0f, plaqueY + 0.10f, -0.19f);
             if (statsTextMesh != null)
                 statsTextMesh.transform.localPosition = new Vector3(0f, plaqueY - 0.10f, -0.19f);
+
+            // Odak modundayken üst durum rozetini gizle ki üst nükleotid harflerini kapatmasın
+            if (statusBadgeMesh != null)
+            {
+                statusBadgeMesh.gameObject.SetActive(!zoomed);
+            }
         }
 
         public void MoveTo(Vector3 worldPos, Quaternion worldRot, float duration = 0.32f)
