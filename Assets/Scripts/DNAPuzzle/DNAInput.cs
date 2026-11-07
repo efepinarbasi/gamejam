@@ -91,5 +91,38 @@ namespace DNAPuzzle
                 return false;
             }
         }
+
+        public static bool GetKeyDown(KeyCode key)
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null)
+            {
+                switch (key)
+                {
+                    case KeyCode.Escape: return Keyboard.current.escapeKey.wasPressedThisFrame;
+                    case KeyCode.Space: return Keyboard.current.spaceKey.wasPressedThisFrame;
+                    case KeyCode.Return:
+                    case KeyCode.KeypadEnter: return Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame;
+                    case KeyCode.Tab: return Keyboard.current.tabKey.wasPressedThisFrame;
+                    case KeyCode.Alpha1:
+                    case KeyCode.Keypad1: return Keyboard.current.digit1Key.wasPressedThisFrame || Keyboard.current.numpad1Key.wasPressedThisFrame;
+                    case KeyCode.Alpha2:
+                    case KeyCode.Keypad2: return Keyboard.current.digit2Key.wasPressedThisFrame || Keyboard.current.numpad2Key.wasPressedThisFrame;
+                    case KeyCode.Alpha3:
+                    case KeyCode.Keypad3: return Keyboard.current.digit3Key.wasPressedThisFrame || Keyboard.current.numpad3Key.wasPressedThisFrame;
+                    case KeyCode.Alpha4:
+                    case KeyCode.Keypad4: return Keyboard.current.digit4Key.wasPressedThisFrame || Keyboard.current.numpad4Key.wasPressedThisFrame;
+                }
+            }
+#endif
+            try
+            {
+                return Input.GetKeyDown(key);
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 }

@@ -77,6 +77,9 @@ namespace DNAPuzzle
                 audioSource.PlayOneShot(clipSnap, 0.55f);
         }
 
+        public void PlayClick() => PlaySnap();
+        public void PlayError() => PlayMismatch();
+
         public void PlayResonance()
         {
             EnsureInitialized();

@@ -79,8 +79,9 @@ namespace DNAPuzzle
             textObj.transform.SetParent(transform, false);
             textObj.transform.localPosition = new Vector3(0f, 1.05f, 0f);
 
+            string[] slotLabels = { "⟵ SLOT Z (BOY) ⟶", "⟵ SLOT V (GÖZ) ⟶", "⟵ SLOT K (DERİ) ⟶", "⟵ SLOT P (UZUV) ⟶" };
             indexTextMesh = textObj.AddComponent<TextMesh>();
-            indexTextMesh.text = $"⟵ GEN #{SlotIndex + 1} ⟶";
+            indexTextMesh.text = (SlotIndex >= 0 && SlotIndex < slotLabels.Length) ? slotLabels[SlotIndex] : $"⟵ GEN #{SlotIndex + 1} ⟶";
             indexTextMesh.characterSize = 0.022f;
             indexTextMesh.fontSize = 96;
             indexTextMesh.alignment = TextAlignment.Center;

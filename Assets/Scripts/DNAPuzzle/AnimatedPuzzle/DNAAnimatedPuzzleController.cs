@@ -26,6 +26,45 @@ namespace DNAPuzzle
         private bool isRepairZoomMode = false;
         private AnimatedGenePiece zoomedGenome = null;
         private GameObject focusBackdropQuad = null;
+
+        // In-Game Dokunmatik Tablet Gerçek Jigsaw Puzzle Durumu (GDD Uyumlu)
+        private Dictionary<LacunaSlotType, EditableGeneStrand> jigsawStrands;
+        private int currentJigsawCreature = 0; // 0..9 (WIBBLE..GROMBLE)
+        private static readonly LacunaSlotType[] tabletSlots = { LacunaSlotType.Z, LacunaSlotType.V, LacunaSlotType.K, LacunaSlotType.P };
+        private static readonly LacunaShape[] tabletBases = { LacunaShape.Circle, LacunaShape.Square, LacunaShape.Triangle, LacunaShape.Diamond };
+        private enum TabletPieceMotion { Idle, Held, Snapping, Returning }
+        private TabletPieceMotion pieceMotion;
+        private float helixPhase;
+        private Texture2D helixRibbons;
+        private const float HelixPeriod = 360f;
+        private const float HelixMiddle = 253f;
+
+        private int movingBaseIndex;
+        private int dragControl;
+        private Vector2 grabOffset;
+        private Vector2 pieceCenter;
+        private Vector2 releaseCenter;
+        private float motionStarted;
+        private int totalRepairs;
+        private string jigsawMessage;
+        private bool jigsawVictoryOpen = false;
+        private string jigsawVictoryText = "";
+
+        // Dokunmatik Tablet & Bulmaca Animasyon Değişkenleri
+        private float tabletOpenAnim = 0f;
+        private bool isTabletClosing = false;
+        private float lastSnapFeedbackTimer = 0f;
+        private Vector2 lastSnapPos = Vector2.zero;
+        private float helixSpeedSurge = 0f;
+
+        // Genom ve Ok Geçiş Animasyon Değişkenleri (Kayan Geçiş ve Otomatik İlerleme)
+        private float transitionProgress = 1f; // 0..1, 1: bitti/sabit
+        private int transitionDirection = 1; // 1: sola kay (ileri), -1: sağa kay (geri)
+        private System.Action transitionMidpointAction = null;
+        private bool hasFiredTransitionMidpoint = false;
+        private float slotCelebrationTimer = 0f;
+        private LacunaSlotType celebratingSlot = LacunaSlotType.Z;
+        private static Texture2D _ringTex;
         private List<AnimatedResonanceBeam> resonanceBeams = new List<AnimatedResonanceBeam>();
         private DNAHelixStrandRibbon helixRibbon;
         private AnimatedCreatureEgg creatureEgg;
@@ -45,6 +84,9 @@ namespace DNAPuzzle
         [System.NonSerialized]
         private SynthesizedCreatureData lastSynthesizedCreature;
         private bool showSynthesisModal = false;
+        private bool showRulebookModal = false;
+        private Vector2 rulebookScrollPos = Vector2.zero;
+        private int currentCreatureIdx = 0;
         private string teamDispatchMessage = "";
 
         private int currentPlanetIdx = 0;
@@ -79,6 +121,7 @@ namespace DNAPuzzle
         private ScreenStation tabletStation;
         private ScreenStation chamberStation;
         private GameObject labChamberCreature;
+        private LacunaTerminalUI lacunaUI;
         #endregion
 
         private void Awake()
@@ -99,8 +142,18 @@ namespace DNAPuzzle
             labStationController = stationCtrl;
             isTerminalActive = false;
 
-            // 3D Puzzle sistemini Lab odasının 120 birim altına taşı
-            transform.position = new Vector3(0f, -120f, 0f);
+            // Terminal açıkken sağ tık veya ESC'nin odaya kontrolsüz dönmesini engelle
+            CameraStationController.IsInputIntercepted = () => (isLabMode && isTerminalActive);
+
+            transform.position = Vector3.zero;
+
+            // 3D masadaki tablet modelinin üzerinde taşan hatalı parçayı (Sphere.001) gizle
+            var tabletObj = GameObject.Find("Gen rehberi tableti");
+            if (tabletObj != null)
+            {
+                var s1 = tabletObj.transform.Find("Sphere.001");
+                if (s1 != null) s1.gameObject.SetActive(false);
+            }
 
             // Lab odasındaki ekran istasyonlarını tespit et
             foreach (var st in Object.FindObjectsByType<ScreenStation>())
@@ -111,14 +164,14 @@ namespace DNAPuzzle
                 else if (st.gameObject.name == "ThirdScreen") chamberStation = st;
             }
 
-            // Sol uzun monitör (FirstScreen): Puzzle buradan kaldırıldı, sadece ortadaki tablet/konsoldan açılır.
+            // Sol uzun monitör (FirstScreen): Puzzle buradan tamamen kaldırıldı, sadece ortadaki tabletten açılır.
             if (monitorStation != null)
             {
                 monitorStation.onEnter.RemoveListener(OnTerminalEnter);
                 monitorStation.onExit.RemoveListener(OnTerminalExit);
             }
 
-            // Yalnızca ortadaki konsol/tablet (SecondScreen) DNA Puzzle terminalini açar
+            // Yalnızca ortadaki konsol/tablet (SecondScreen) DNA Puzzle tabletini açar
             if (tabletStation != null)
             {
                 tabletStation.onEnter.RemoveListener(OnTerminalEnter);
@@ -131,7 +184,11 @@ namespace DNAPuzzle
 
             // Başlangıçta tüm puzzle geometrisini ve kamerasını kapalı tut (oda tamamen orijinal ve temiz kalsın!)
             if (puzzleRoot != null) puzzleRoot.SetActive(false);
-            if (dedicatedTerminalCamera != null) dedicatedTerminalCamera.gameObject.SetActive(false);
+            if (dedicatedTerminalCamera != null)
+            {
+                dedicatedTerminalCamera.gameObject.SetActive(false);
+                dedicatedTerminalCamera.enabled = false;
+            }
         }
 
         private Material CreateHoloMaterial(Color col, bool transparent = true)
@@ -182,8 +239,15 @@ namespace DNAPuzzle
         {
             if (!isLabMode) return;
             isTerminalActive = true;
-            if (puzzleRoot != null) puzzleRoot.SetActive(true);
-            if (dedicatedTerminalCamera != null) dedicatedTerminalCamera.gameObject.SetActive(true);
+            tabletOpenAnim = 0f;
+            isTabletClosing = false;
+            CameraStationController.IsInputIntercepted = () => true;
+            if (puzzleRoot != null) puzzleRoot.SetActive(false);
+            if (dedicatedTerminalCamera != null)
+            {
+                dedicatedTerminalCamera.gameObject.SetActive(false);
+                dedicatedTerminalCamera.enabled = false;
+            }
             audioManager?.PlayResonance();
             audioManager?.PlaySnap();
         }
@@ -195,14 +259,29 @@ namespace DNAPuzzle
             {
                 ExitRepairZoomMode();
             }
+            CancelTabletDrag();
             isTerminalActive = false;
+            tabletOpenAnim = 0f;
+            isTabletClosing = false;
+            CameraStationController.IsInputIntercepted = null;
             if (puzzleRoot != null) puzzleRoot.SetActive(false);
-            if (dedicatedTerminalCamera != null) dedicatedTerminalCamera.gameObject.SetActive(false);
+            if (dedicatedTerminalCamera != null)
+            {
+                dedicatedTerminalCamera.gameObject.SetActive(false);
+                dedicatedTerminalCamera.enabled = false;
+            }
+        }
+
+        public void StartTabletExit()
+        {
+            if (!isLabMode || !isTerminalActive) return;
+            isTabletClosing = true;
         }
 
         public void ReturnToLabRoom()
         {
             if (!isLabMode || !isTerminalActive) return;
+            isTabletClosing = false;
             OnTerminalExit();
             if (labStationController != null)
             {
@@ -265,11 +344,213 @@ namespace DNAPuzzle
                 new Vector3(0f, 1.6f, 0f), 0.035f, 96, Color.white);
         }
 
+        /// <summary>
+        /// Lacuna Genetics GDD (Sayfa 4-5) Hidden Designer Tables'a göre
+        /// yaratığın 4 final geninden (Z: Boy, V: Göz, K: Deri Rengi, P: Uzuvlar)
+        /// 3D modelini ve kapsülünü kuluçka odasında (Glass arkasında) inşa eder.
+        /// </summary>
+        public void SpawnLacunaCreatureInLabChamber(string creatureName, string planetName, string geneZ, string geneV, string geneK, string geneP)
+        {
+            if (labChamberCreature != null) Destroy(labChamberCreature);
+
+            labChamberCreature = new GameObject($"LacunaCreature_{creatureName}");
+            labChamberCreature.transform.position = new Vector3(6.5f, 4.5f, -4.3f);
+
+            // 1. Deri Rengi (Slot K: KRELL=Turuncu, KUPPA=Sarı, KOSH=Beyaz, KIMBO=Turkuaz, KLOOT=Mor)
+            Color skinColor = new Color(1.0f, 0.45f, 0.12f);
+            switch (geneK?.ToUpperInvariant())
+            {
+                case "KRELL": skinColor = new Color(1.0f, 0.45f, 0.12f); break; // Orange
+                case "KUPPA": skinColor = new Color(1.0f, 0.88f, 0.15f); break; // Yellow
+                case "KOSH":  skinColor = new Color(0.92f, 0.96f, 1.0f); break; // White
+                case "KIMBO": skinColor = new Color(0.10f, 0.88f, 0.78f); break; // Teal
+                case "KLOOT": skinColor = new Color(0.68f, 0.25f, 0.98f); break; // Violet
+            }
+
+            // 2. Boy Ölçeği (Slot Z: ZUUN=Tiny, ZIMMOK=Short, ZEMBO=Medium, ZORP=Tall, ZAKKO=Giant)
+            float heightScale = 1.0f;
+            switch (geneZ?.ToUpperInvariant())
+            {
+                case "ZUUN":   heightScale = 0.52f; break;
+                case "ZIMMOK": heightScale = 0.75f; break;
+                case "ZEMBO":  heightScale = 1.00f; break;
+                case "ZORP":   heightScale = 1.30f; break;
+                case "ZAKKO":  heightScale = 1.62f; break;
+            }
+
+            Material skinMat = CreateHoloMaterial(skinColor, false);
+            Material eyeWhiteMat = CreateHoloMaterial(new Color(1f, 1f, 0.92f), false);
+            Material pupilMat = CreateHoloMaterial(new Color(0.05f, 0.05f, 0.08f), false);
+            Material capsuleGlassMat = CreateHoloMaterial(new Color(0.15f, 0.85f, 1f, 0.22f), true);
+            Material capsuleRingMat = CreateHoloMaterial(new Color(0.2f, 0.9f, 0.65f, 0.85f), false);
+
+            // Biyo-Kapsül Dış Camı ve Halkaları
+            var capsuleTube = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            capsuleTube.name = "BioCapsuleGlass";
+            capsuleTube.transform.SetParent(labChamberCreature.transform, false);
+            capsuleTube.transform.localScale = new Vector3(2.2f, 1.6f, 2.2f);
+            if (capsuleTube.GetComponent<Collider>()) Destroy(capsuleTube.GetComponent<Collider>());
+            capsuleTube.GetComponent<Renderer>().material = capsuleGlassMat;
+
+            var topCap = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            topCap.name = "CapsuleTopRing";
+            topCap.transform.SetParent(labChamberCreature.transform, false);
+            topCap.transform.localPosition = new Vector3(0f, 1.62f, 0f);
+            topCap.transform.localScale = new Vector3(2.35f, 0.08f, 2.35f);
+            if (topCap.GetComponent<Collider>()) Destroy(topCap.GetComponent<Collider>());
+            topCap.GetComponent<Renderer>().material = capsuleRingMat;
+
+            var botCap = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            botCap.name = "CapsuleBottomRing";
+            botCap.transform.SetParent(labChamberCreature.transform, false);
+            botCap.transform.localPosition = new Vector3(0f, -1.62f, 0f);
+            botCap.transform.localScale = new Vector3(2.35f, 0.08f, 2.35f);
+            if (botCap.GetComponent<Collider>()) Destroy(botCap.GetComponent<Collider>());
+            botCap.GetComponent<Renderer>().material = capsuleRingMat;
+
+            // Yaratık Gövde Kökü
+            var bodyRoot = new GameObject("CreatureBodyRoot");
+            bodyRoot.transform.SetParent(labChamberCreature.transform, false);
+            bodyRoot.transform.localScale = new Vector3(0.85f, heightScale * 0.85f, 0.85f);
+
+            var torso = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            torso.name = "Torso";
+            torso.transform.SetParent(bodyRoot.transform, false);
+            torso.transform.localScale = new Vector3(0.95f, 0.85f, 0.85f);
+            if (torso.GetComponent<Collider>()) Destroy(torso.GetComponent<Collider>());
+            torso.GetComponent<Renderer>().material = skinMat;
+
+            // 3. Gözler (Slot V: VIXX=Eyeless, VOLM=One eye, VESHI=Two eyes, VARQ=Three eyes, VUNDO=Stalk eyes)
+            string vUpper = geneV != null ? geneV.ToUpperInvariant() : "VESHI";
+            if (vUpper == "VOLM")
+            {
+                CreateCreatureEye(bodyRoot.transform, new Vector3(0f, 0.35f, -0.45f), 0.28f, eyeWhiteMat, pupilMat);
+            }
+            else if (vUpper == "VESHI")
+            {
+                CreateCreatureEye(bodyRoot.transform, new Vector3(-0.20f, 0.35f, -0.42f), 0.20f, eyeWhiteMat, pupilMat);
+                CreateCreatureEye(bodyRoot.transform, new Vector3(0.20f, 0.35f, -0.42f), 0.20f, eyeWhiteMat, pupilMat);
+            }
+            else if (vUpper == "VARQ")
+            {
+                CreateCreatureEye(bodyRoot.transform, new Vector3(-0.22f, 0.28f, -0.42f), 0.18f, eyeWhiteMat, pupilMat);
+                CreateCreatureEye(bodyRoot.transform, new Vector3(0.22f, 0.28f, -0.42f), 0.18f, eyeWhiteMat, pupilMat);
+                CreateCreatureEye(bodyRoot.transform, new Vector3(0f, 0.52f, -0.40f), 0.19f, eyeWhiteMat, pupilMat);
+            }
+            else if (vUpper == "VUNDO")
+            {
+                // Saplı Gözler (Stalk eyes)
+                for (int s = -1; s <= 1; s += 2)
+                {
+                    var stalk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    stalk.name = "EyeStalk";
+                    stalk.transform.SetParent(bodyRoot.transform, false);
+                    stalk.transform.localPosition = new Vector3(s * 0.24f, 0.88f, -0.15f);
+                    stalk.transform.localRotation = Quaternion.Euler(-18f, 0f, -s * 16f);
+                    stalk.transform.localScale = new Vector3(0.08f, 0.32f, 0.08f);
+                    if (stalk.GetComponent<Collider>()) Destroy(stalk.GetComponent<Collider>());
+                    stalk.GetComponent<Renderer>().material = skinMat;
+
+                    CreateCreatureEye(bodyRoot.transform, new Vector3(s * 0.32f, 1.18f, -0.26f), 0.22f, eyeWhiteMat, pupilMat);
+                }
+            }
+
+            // 4. Uzuvlar (Slot P: PHELM=Armless, PONDO=Stubby limbs, PLORT=Two arms, PUNKO=Tentacles, PRIZZ=Four arms)
+            string pUpper = geneP != null ? geneP.ToUpperInvariant() : "PLORT";
+            if (pUpper == "PONDO")
+            {
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(-0.55f, 0.05f, 0f), new Vector3(0.18f, 0.22f, 0.18f), Quaternion.Euler(0f, 0f, 45f), skinMat);
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(0.55f, 0.05f, 0f), new Vector3(0.18f, 0.22f, 0.18f), Quaternion.Euler(0f, 0f, -45f), skinMat);
+            }
+            else if (pUpper == "PLORT")
+            {
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(-0.72f, 0.05f, 0f), new Vector3(0.16f, 0.52f, 0.16f), Quaternion.Euler(0f, 0f, 55f), skinMat);
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(0.72f, 0.05f, 0f), new Vector3(0.16f, 0.52f, 0.16f), Quaternion.Euler(0f, 0f, -55f), skinMat);
+            }
+            else if (pUpper == "PRIZZ")
+            {
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(-0.72f, 0.25f, 0f), new Vector3(0.15f, 0.50f, 0.15f), Quaternion.Euler(0f, 0f, 48f), skinMat);
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(0.72f, 0.25f, 0f), new Vector3(0.15f, 0.50f, 0.15f), Quaternion.Euler(0f, 0f, -48f), skinMat);
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(-0.70f, -0.22f, 0f), new Vector3(0.15f, 0.48f, 0.15f), Quaternion.Euler(0f, 0f, 68f), skinMat);
+                CreateCreatureLimb(bodyRoot.transform, new Vector3(0.70f, -0.22f, 0f), new Vector3(0.15f, 0.48f, 0.15f), Quaternion.Euler(0f, 0f, -68f), skinMat);
+            }
+            else if (pUpper == "PUNKO")
+            {
+                // 4 Dokunaç (Tentacles)
+                for (int t = 0; t < 4; t++)
+                {
+                    float side = (t % 2 == 0) ? -1f : 1f;
+                    float yOff = (t < 2) ? 0.18f : -0.22f;
+                    for (int seg = 0; seg < 3; seg++)
+                    {
+                        var segGo = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                        segGo.name = "TentacleSeg";
+                        segGo.transform.SetParent(bodyRoot.transform, false);
+                        float dist = 0.52f + seg * 0.22f;
+                        float waveY = yOff + Mathf.Sin(seg * 1.2f) * 0.12f;
+                        segGo.transform.localPosition = new Vector3(side * dist, waveY, -0.1f * seg);
+                        segGo.transform.localScale = Vector3.one * (0.24f - seg * 0.05f);
+                        if (segGo.GetComponent<Collider>()) Destroy(segGo.GetComponent<Collider>());
+                        segGo.GetComponent<Renderer>().material = skinMat;
+                    }
+                }
+            }
+
+            // İç Işık (Point Light)
+            var lightGo = new GameObject("SpecimenLight");
+            lightGo.transform.SetParent(labChamberCreature.transform, false);
+            var pl = lightGo.AddComponent<Light>();
+            pl.type = LightType.Point;
+            pl.color = skinColor;
+            pl.range = 8f;
+            pl.intensity = 3.2f;
+
+            // Numune Bilgi Tabelası
+            CreateTextMeshOn(labChamberCreature.transform, "SpecimenPlaque",
+                $"🔬 KAPSÜLLENEN NUMUNE: {creatureName} [{planetName}]\n[ Z:{geneZ} • V:{geneV} • K:{geneK} • P:{geneP} ]",
+                new Vector3(0f, 1.95f, 0f), 0.032f, 96, Color.white);
+        }
+
+        private void CreateCreatureEye(Transform parent, Vector3 localPos, float size, Material whiteMat, Material pupilMat)
+        {
+            var eye = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            eye.name = "Eye";
+            eye.transform.SetParent(parent, false);
+            eye.transform.localPosition = localPos;
+            eye.transform.localScale = Vector3.one * size;
+            if (eye.GetComponent<Collider>()) Destroy(eye.GetComponent<Collider>());
+            eye.GetComponent<Renderer>().material = whiteMat;
+
+            var pupil = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            pupil.name = "Pupil";
+            pupil.transform.SetParent(eye.transform, false);
+            pupil.transform.localPosition = new Vector3(0f, 0f, -0.42f);
+            pupil.transform.localScale = Vector3.one * 0.48f;
+            if (pupil.GetComponent<Collider>()) Destroy(pupil.GetComponent<Collider>());
+            pupil.GetComponent<Renderer>().material = pupilMat;
+        }
+
+        private void CreateCreatureLimb(Transform parent, Vector3 localPos, Vector3 scale, Quaternion rot, Material mat)
+        {
+            var limb = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            limb.name = "Limb";
+            limb.transform.SetParent(parent, false);
+            limb.transform.localPosition = localPos;
+            limb.transform.localRotation = rot;
+            limb.transform.localScale = scale;
+            if (limb.GetComponent<Collider>()) Destroy(limb.GetComponent<Collider>());
+            limb.GetComponent<Renderer>().material = mat;
+        }
+
         public void ViewInLabChamber()
         {
             if (!isLabMode) return;
             showSynthesisModal = false;
             isTerminalActive = false;
+            if (puzzleRoot != null)
+            {
+                puzzleRoot.SetActive(false);
+            }
             if (dedicatedTerminalCamera != null)
             {
                 dedicatedTerminalCamera.gameObject.SetActive(false);
@@ -302,6 +583,11 @@ namespace DNAPuzzle
 
             CameraStationController.IsInputIntercepted = () =>
             {
+                if (isLabMode && isTerminalActive && showRulebookModal)
+                {
+                    showRulebookModal = false;
+                    return true;
+                }
                 if (isLabMode && isTerminalActive && isRepairZoomMode)
                 {
                     ExitRepairZoomMode();
@@ -419,9 +705,15 @@ namespace DNAPuzzle
                 res
             );
 
-            if (isLabMode && lastSynthesizedCreature != null && lastSynthesizedCreature.isValid)
+            if (isLabMode)
             {
-                SpawnCreatureInLabChamber(lastSynthesizedCreature);
+                var creatures = LacunaGeneticsDatabase.GetCreatures();
+                var curC = creatures[Mathf.Clamp(currentCreatureIdx, 0, creatures.Count - 1)];
+                string zG = poolPieces.Count > 0 && poolPieces[0]?.Data != null ? poolPieces[0].Data.geneName : curC.startGeneZ;
+                string vG = poolPieces.Count > 1 && poolPieces[1]?.Data != null ? poolPieces[1].Data.geneName : curC.startGeneV;
+                string kG = poolPieces.Count > 2 && poolPieces[2]?.Data != null ? poolPieces[2].Data.geneName : curC.startGeneK;
+                string pG = poolPieces.Count > 3 && poolPieces[3]?.Data != null ? poolPieces[3].Data.geneName : curC.startGeneP;
+                SpawnLacunaCreatureInLabChamber(curC.creatureName, curC.targetPlanet, zG, vG, kG, pG);
             }
 
             RefreshAllStates();
@@ -590,7 +882,21 @@ namespace DNAPuzzle
             creatureEgg = eggObj.AddComponent<AnimatedCreatureEgg>();
         }
 
-        public void LoadPlanet(int idx)
+        public void LoadCreature(int creatureIdx)
+        {
+            var creatures = LacunaGeneticsDatabase.GetCreatures();
+            currentCreatureIdx = Mathf.Clamp(creatureIdx, 0, creatures.Count - 1);
+            DNAPuzzleSampleData.ActiveCreatureIndex = currentCreatureIdx;
+
+            var c = creatures[currentCreatureIdx];
+            int pIdx = 0;
+            if (c.targetPlanet == "SNIBBLEX") pIdx = 1;
+            else if (c.targetPlanet == "OOMGARTH") pIdx = 2;
+
+            LoadPlanet(pIdx, keepActiveCreature: true);
+        }
+
+        public void LoadPlanet(int idx, bool keepActiveCreature = false)
         {
             if (isRepairZoomMode)
             {
@@ -602,6 +908,24 @@ namespace DNAPuzzle
             lastResonanceCount = 0;
             lastInstabilityCount = 0;
             selectedSlot = 0;
+
+            if (!keepActiveCreature)
+            {
+                var creatures = LacunaGeneticsDatabase.GetCreatures();
+                string targetP = idx == 1 ? "SNIBBLEX" : (idx == 2 ? "OOMGARTH" : "FABAUP");
+                if (creatures[currentCreatureIdx].targetPlanet != targetP)
+                {
+                    for (int i = 0; i < creatures.Count; i++)
+                    {
+                        if (creatures[i].targetPlanet == targetP)
+                        {
+                            currentCreatureIdx = i;
+                            break;
+                        }
+                    }
+                }
+                DNAPuzzleSampleData.ActiveCreatureIndex = currentCreatureIdx;
+            }
 
             if (planets == null || planets.Count == 0)
                 planets = DNAPuzzleSampleData.CreateSamplePlanets();
@@ -619,6 +943,9 @@ namespace DNAPuzzle
             Build4BrokenGenomes(planet);
             BuildRepairCandidateTray(planet);
             RefreshAllStates();
+
+            var curC = LacunaGeneticsDatabase.GetCreatures()[currentCreatureIdx];
+            repairFeedbackMessage = $"🧬 DENEY #{curC.creatureNumber}: {curC.creatureName} ({curC.targetPlanet}) | Bozuk genomlara tıklayıp ●↔■ ve ▲↔◆ kurallarına göre onarın ve yanlış geni düzeltin!";
         }
 
         private void BuildSlotsAndStrand(int slotCount)
@@ -774,6 +1101,18 @@ namespace DNAPuzzle
             focusBackdropQuad.SetActive(false);
         }
 
+        public Vector3 PuzzleToWorld(Vector3 localPos)
+        {
+            Transform root = puzzleRoot != null ? puzzleRoot.transform : transform;
+            return root.TransformPoint(localPos);
+        }
+
+        public Vector3 WorldToPuzzle(Vector3 worldPos)
+        {
+            Transform root = puzzleRoot != null ? puzzleRoot.transform : transform;
+            return root.InverseTransformPoint(worldPos);
+        }
+
         public void EnterRepairZoomMode(AnimatedGenePiece piece)
         {
             if (piece == null) return;
@@ -803,7 +1142,7 @@ namespace DNAPuzzle
                     {
                         float spX = 2.95f;
                         float stX = 1.35f - ((poolPieces.Count - 1) * spX * 0.5f);
-                        zoomedGenome.transform.position = new Vector3(stX + prevIdx * spX, -0.58f, 0f);
+                        zoomedGenome.transform.position = PuzzleToWorld(new Vector3(stX + prevIdx * spX, -0.58f, 0f));
                     }
                 }
                 zoomedGenome.gameObject.SetActive(false);
@@ -837,7 +1176,7 @@ namespace DNAPuzzle
             dragCandidatePiece = null;
             snapTargetSlotIndex = -1;
 
-            Vector3 centerPos = new Vector3(0f, 0.72f, -1.8f);
+            Vector3 centerPos = PuzzleToWorld(new Vector3(0f, 0.72f, -1.8f));
             zoomedGenome.SetTargetScale(Vector3.one * 1.65f);
             zoomedGenome.MoveTo(centerPos, Quaternion.identity, 0.40f);
 
@@ -852,7 +1191,7 @@ namespace DNAPuzzle
                 if (repairCandidates[i] != null)
                 {
                     repairCandidates[i].gameObject.SetActive(true);
-                    Vector3 pos = new Vector3(startX + i * spacingX, trayY, -1.8f);
+                    Vector3 pos = PuzzleToWorld(new Vector3(startX + i * spacingX, trayY, -1.8f));
                     repairCandidates[i].SetBasePosition(pos, Vector3.one * 1.12f);
                 }
             }
@@ -889,7 +1228,7 @@ namespace DNAPuzzle
                 if (repairCandidates[i] != null)
                 {
                     repairCandidates[i].gameObject.SetActive(true);
-                    Vector3 pos = new Vector3(startX + i * spacingX, trayY, 0f);
+                    Vector3 pos = PuzzleToWorld(new Vector3(startX + i * spacingX, trayY, 0f));
                     repairCandidates[i].SetBasePosition(pos, Vector3.one);
                 }
             }
@@ -1070,9 +1409,11 @@ namespace DNAPuzzle
 
         private void HandleCandidateClicked(AnimatedRepairCandidate candidate)
         {
-            if (isSimulating || showSynthesisModal || candidate == null) return;
+            if (isSimulating || showSynthesisModal || showRulebookModal || candidate == null) return;
             if (Time.frameCount == lastClickFrame) return;
             lastClickFrame = Time.frameCount;
+
+            string sym = DNAHelper.GetNucleotideSymbol(candidate.Nucleotide);
 
             if (isRepairZoomMode)
             {
@@ -1086,14 +1427,34 @@ namespace DNAPuzzle
                     return;
                 }
 
-                // Odak modunda oyuncu baz yerleştiriyor
+                // Eğer genom zaten onarıldıysa, seçili basamağı (selectedEditRungIndex) bu bazla mutasyona uğrat!
+                if (gData.isRepaired || !gData.isBroken)
+                {
+                    int editIdx = gData.selectedEditRungIndex >= 0 ? gData.selectedEditRungIndex : 0;
+                    string matchedGene = zoomedGenome.MutateRungWithNucleotide(editIdx, candidate.Nucleotide);
+                    candidate.TriggerClickPulse();
+                    audioManager?.PlayResonance();
+                    audioManager?.PlaySnap();
+                    if (!string.IsNullOrEmpty(matchedGene))
+                    {
+                        repairFeedbackMessage = $"🧬 MUTASYON BAŞARILI! Dizilim {matchedGene} ({gData.lacunaTraitTR}) genomuna dönüştü!";
+                    }
+                    else
+                    {
+                        repairFeedbackMessage = $"🔬 Çift #{editIdx + 1} [{sym} ↔ {DNAHelper.GetNucleotideSymbol(DNAHelper.ShapeToNucleotide(LacunaGeneticsDatabase.GetPartner(DNAHelper.NucleotideToShape(candidate.Nucleotide))))}] olarak güncellendi!";
+                    }
+                    RefreshAllStates();
+                    return;
+                }
+
+                // Odak modunda oyuncu eksik (?) bazı onarıyor
                 bool zoomSuccess = zoomedGenome.TryRepairWith(candidate.Nucleotide);
                 if (zoomSuccess)
                 {
                     candidate.TriggerClickPulse();
                     audioManager?.PlayResonance();
                     audioManager?.PlaySnap();
-                    repairFeedbackMessage = $"✨ HARİKA! {gData.geneName} ({candidate.Nucleotide}) ile onarıldı! İstersen tekrar değiştirebilir veya sarmala yerleştirebilirsin.";
+                    repairFeedbackMessage = $"✨ HARİKA! {gData.geneName} ({sym}) ile onarıldı! Şimdi yanlış gense dönüştürebilir veya sarmala yerleştirebilirsin.";
                 }
                 else
                 {
@@ -1106,7 +1467,7 @@ namespace DNAPuzzle
                     else
                     {
                         audioManager?.PlayMismatch();
-                        repairFeedbackMessage = $"⚠️ UYUMSUZ BAZ! Kalan Onarım Hakkı: {gData.remainingRepairAttempts}/{gData.maxRepairAttempts}. {gData.repairHint}";
+                        repairFeedbackMessage = $"⚠️ UYUMSUZ BAZ ({sym})! Kalan Onarım Hakkı: {gData.remainingRepairAttempts}/{gData.maxRepairAttempts}. {gData.repairHint}";
                     }
                 }
 
@@ -1146,7 +1507,7 @@ namespace DNAPuzzle
                 candidate.TriggerClickPulse();
                 audioManager?.PlayResonance();
                 audioManager?.PlaySnap();
-                repairFeedbackMessage = $"✨ HARİKA! {targetGenome.Data.geneName} onarıldı! Üzerine tıklayarak ana DNA sarmalına yerleştirin.";
+                repairFeedbackMessage = $"✨ HARİKA! {targetGenome.Data.geneName} ({sym}) ile onarıldı! Üzerine tıklayarak ana DNA sarmalına yerleştirin.";
 
                 var nextBroken = poolPieces.Find(p => p != null && !p.IsEquipped && p.Data != null && p.Data.isBroken && !p.Data.isRepaired && !p.Data.isDeformed);
                 if (nextBroken != null)
@@ -1166,7 +1527,7 @@ namespace DNAPuzzle
                 {
                     audioManager?.PlayMismatch();
                     int rem = targetGenome.Data != null ? targetGenome.Data.remainingRepairAttempts : 0;
-                    repairFeedbackMessage = $"❌ EŞLEŞME HATALI! Kalan Hak: {rem}/3. {targetGenome.Data.repairHint}";
+                    repairFeedbackMessage = $"❌ EŞLEŞME HATALI ({sym})! Kalan Hak: {rem}/3. {targetGenome.Data.repairHint}";
                 }
             }
 
@@ -1182,7 +1543,7 @@ namespace DNAPuzzle
             int count = poolPieces.Count;
             float spacingX = 2.95f;
             float startX = 1.35f - ((count - 1) * spacingX * 0.5f);
-            Vector3 homePos = new Vector3(startX + idx * spacingX, -0.58f, 0f);
+            Vector3 homePos = PuzzleToWorld(new Vector3(startX + idx * spacingX, -0.58f, 0f));
             piece.SetTargetScale(Vector3.one * 0.82f);
             piece.MoveTo(homePos, Quaternion.identity, 0.32f);
         }
@@ -1257,16 +1618,16 @@ namespace DNAPuzzle
         public bool IsPointerOverHUD()
         {
             if (isDraggingPiece || isDraggingCandidate) return false;
-            if (showSynthesisModal) return true;
+            if (showSynthesisModal || showRulebookModal) return true;
             Vector3 mp = DNAInput.MousePosition;
             float guiY = Screen.height - mp.y;
             if (isRepairZoomMode)
             {
-                if (guiY < 120f) return true; // Üst laboratuvar başlık ve teşhis kartı alanı
+                if (guiY < 160f) return true; // Üst laboratuvar başlık, teşhis ve genom dönüştürme kartı alanı
                 if (guiY > Screen.height - 62f) return true; // Alt aksiyon ve yerleştir butonu
                 return false;
             }
-            if (guiY < 48f) return true; // Üst gezegen & durum barı
+            if (guiY < 96f) return true; // Üst gezegen & durum barı
             if (mp.x > Screen.width - 295f && guiY < 260f) return true; // Sağ üst test & kontrol butonları
 
             // Ana ekrandaki yüzen hızlı aksiyon butonları (🚀 Tak / 🔧 Düzenle / ↩️ Çıkar) kontrolü
@@ -1461,6 +1822,26 @@ namespace DNAPuzzle
                 return;
             }
 
+            if (targetGenome.Data.isRepaired || !targetGenome.Data.isBroken)
+            {
+                int editIdx = targetGenome.Data.selectedEditRungIndex >= 0 ? targetGenome.Data.selectedEditRungIndex : 0;
+                string matchedGene = targetGenome.MutateRungWithNucleotide(editIdx, candidate.Nucleotide);
+                candidate.TriggerClickPulse();
+                audioManager?.PlayResonance();
+                audioManager?.PlaySnap();
+                string sym = DNAHelper.GetNucleotideSymbol(candidate.Nucleotide);
+                if (!string.IsNullOrEmpty(matchedGene))
+                {
+                    repairFeedbackMessage = $"🧬 MUTASYON BAŞARILI! {matchedGene} ({targetGenome.Data.lacunaTraitTR}) oluşturuldu!";
+                }
+                else
+                {
+                    repairFeedbackMessage = $"🔬 Çift #{editIdx + 1} [{sym}] olarak güncellendi!";
+                }
+                RefreshAllStates();
+                return;
+            }
+
             bool success = targetGenome.TryRepairWith(candidate.Nucleotide);
             if (success)
             {
@@ -1496,18 +1877,86 @@ namespace DNAPuzzle
 
         private void Update()
         {
+            if (isTerminalActive)
+            {
+                // Geçiş animasyonu ilerlemesi (Oklar ve otomatik genom geçişi)
+                if (transitionProgress < 1f)
+                {
+                    transitionProgress = Mathf.MoveTowards(transitionProgress, 1f, Time.unscaledDeltaTime / 0.38f);
+                    if (!hasFiredTransitionMidpoint && transitionProgress >= 0.5f)
+                    {
+                        hasFiredTransitionMidpoint = true;
+                        transitionMidpointAction?.Invoke();
+                        transitionMidpointAction = null;
+                    }
+                }
+
+                // Genom tamamlanma kutlaması ve otomatik geçiş tetikleme
+                if (slotCelebrationTimer > 0f)
+                {
+                    slotCelebrationTimer = Mathf.MoveTowards(slotCelebrationTimer, 0f, Time.unscaledDeltaTime);
+                    if (slotCelebrationTimer <= 0f)
+                    {
+                        // Kutlama bitti -> Otomatik akıcı geçiş animasyonuyla sıradaki genoma geç
+                        StartTransition(1, null);
+                    }
+                }
+
+                // DNA heliks dönüşü ve eşleşme hız dalgası
+                helixSpeedSurge = Mathf.MoveTowards(helixSpeedSurge, 0f, Time.unscaledDeltaTime * 1.8f);
+                float currentHelixSpeed = (pieceMotion == TabletPieceMotion.Held ? 0.40f : 0.82f) + helixSpeedSurge * 2.4f;
+                helixPhase = Mathf.Repeat(helixPhase + Time.unscaledDeltaTime * currentHelixSpeed, Mathf.PI * 2);
+
+                // Tablet açılış / yumuşak kapanış animasyonu
+                if (!isTabletClosing)
+                {
+                    tabletOpenAnim = Mathf.MoveTowards(tabletOpenAnim, 1f, Time.unscaledDeltaTime * 3.4f);
+                }
+                else
+                {
+                    tabletOpenAnim = Mathf.MoveTowards(tabletOpenAnim, 0f, Time.unscaledDeltaTime * 5.0f);
+                    if (tabletOpenAnim <= 0.001f)
+                    {
+                        isTabletClosing = false;
+                        OnTerminalExit();
+                        if (labStationController != null) labStationController.ReturnToBase();
+                        return;
+                    }
+                }
+            }
+
             EnsurePuzzleInitialized();
 
             if (isLabMode && !isTerminalActive)
             {
                 UpdateLabHoloPreview();
+                // Oyuncu Base görünümündeyken 'T' veya 'Space' ile tablete geçebilsin
+                if (labStationController != null && labStationController.CurrentState == CameraStationController.State.AtBase)
+                {
+                    if (DNAInput.GetKeyDown(KeyCode.T) || DNAInput.GetKeyDown(KeyCode.Space))
+                    {
+                        if (tabletStation != null) labStationController.GoToStation(tabletStation);
+                        else OnTerminalEnter();
+                    }
+                }
                 return;
             }
 
             if (isLabMode && isTerminalActive)
             {
-                if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
+                // Yalnızca Escape tuşu pencereyi kapatır, sağ tık bulmaca içi taş çıkarmada kullanılır!
+                if (DNAInput.GetKeyDown(KeyCode.Escape))
                 {
+                    if (showRulebookModal)
+                    {
+                        showRulebookModal = false;
+                        return;
+                    }
+                    if (jigsawVictoryOpen)
+                    {
+                        jigsawVictoryOpen = false;
+                        return;
+                    }
                     if (isRepairZoomMode)
                     {
                         ExitRepairZoomMode();
@@ -1519,9 +1968,10 @@ namespace DNAPuzzle
                         return;
                     }
                 }
+                return; // Tablet açıkken alttaki 3D fizik ışın testlerini çalıştırma!
             }
 
-            if (isSimulating || showSynthesisModal) return;
+            if (isSimulating || showSynthesisModal || showRulebookModal) return;
 
             Camera cam = puzzleCamera != null ? puzzleCamera : Camera.main;
             if (cam == null) return;
@@ -1692,7 +2142,9 @@ namespace DNAPuzzle
                                 {
                                     bool isMatch = DNAHelper.IsComplementary(leftPiece.Data.rightConnector, draggedPiece.Data.leftConnector);
                                     if (isMatch) comp = true;
-                                    matchDetails += $"Sol: [{leftPiece.Data.rightConnector} ⟷ {draggedPiece.Data.leftConnector} {(isMatch ? "✓ UYUMLU" : "✕")}] ";
+                                    string lSym = DNAHelper.GetNucleotideSymbol(leftPiece.Data.rightConnector);
+                                    string rSym = DNAHelper.GetNucleotideSymbol(draggedPiece.Data.leftConnector);
+                                    matchDetails += $"Sol: [{lSym} ⟷ {rSym} {(isMatch ? "✓ EŞLENİK" : "✕")}] ";
                                     leftPiece.SetConnectorGlow(false, true, isMatch);
                                     draggedPiece.SetConnectorGlow(true, true, isMatch);
                                 }
@@ -1705,7 +2157,9 @@ namespace DNAPuzzle
                                 {
                                     bool isMatch = DNAHelper.IsComplementary(draggedPiece.Data.rightConnector, rightPiece.Data.leftConnector);
                                     if (isMatch) comp = true;
-                                    matchDetails += $"Sağ: [{draggedPiece.Data.rightConnector} ⟷ {rightPiece.Data.leftConnector} {(isMatch ? "✓ UYUMLU" : "✕")}] ";
+                                    string lSym = DNAHelper.GetNucleotideSymbol(draggedPiece.Data.rightConnector);
+                                    string rSym = DNAHelper.GetNucleotideSymbol(rightPiece.Data.leftConnector);
+                                    matchDetails += $"Sağ: [{lSym} ⟷ {rSym} {(isMatch ? "✓ EŞLENİK" : "✕")}] ";
                                     rightPiece.SetConnectorGlow(true, true, isMatch);
                                     draggedPiece.SetConnectorGlow(false, true, isMatch);
                                 }
@@ -1777,7 +2231,8 @@ namespace DNAPuzzle
                         if (targetGene != null && targetGene.Data != null)
                         {
                             candidateDropTargetGenome = targetGene;
-                            dragInterlockMessage = $"🧬 [{draggedCandidate.Nucleotide}] Bazını {targetGene.Data.geneName} Genomuna Yerleştirmek İçin Bırakın!";
+                            string sym = DNAHelper.GetNucleotideSymbol(draggedCandidate.Nucleotide);
+                            dragInterlockMessage = $"🧬 [{sym}] Bazını {targetGene.Data.geneName} Genomuna Yerleştirmek İçin Bırakın!";
                             ShowSnapGuide(draggedCandidate.transform.position, targetGene.transform.position, true);
                         }
                         else
@@ -1813,7 +2268,8 @@ namespace DNAPuzzle
                         if (draggedPiece.CurrentSlotIndex >= 0)
                         {
                             // Eğer sarmaldan aşağı tezgaha sürüklendiyse sarmaldan çıkar
-                            if (draggedPiece.transform.position.y < 0.2f)
+                            float benchThreshold = PuzzleToWorld(new Vector3(0f, 0.2f, 0f)).y;
+                            if (draggedPiece.transform.position.y < benchThreshold)
                             {
                                 int sIdx = draggedPiece.CurrentSlotIndex;
                                 activeSlots[sIdx].RemovePiece();
@@ -1878,50 +2334,32 @@ namespace DNAPuzzle
         #region Taşmasız Kompakt Modern HUD Arayüzü
         private void OnGUI()
         {
-            if (isLabMode && !isTerminalActive)
+            if (isLabMode)
             {
-                if (labStationController != null && labStationController.CurrentState == CameraStationController.State.AtBase)
+                if (!isTerminalActive)
                 {
-                    Camera mainCam = Camera.main;
-                    if (mainCam != null && mainCam.pixelRect.Contains(Input.mousePosition))
-                    {
-                        Ray ray = mainCam.ScreenPointToRay(Input.mousePosition);
-                        if (Physics.Raycast(ray, out RaycastHit hit, 50f))
-                        {
-                            var station = hit.collider.GetComponentInParent<ScreenStation>();
-                            if (station != null && station == tabletStation)
-                            {
-                                Vector2 mPos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-                                GUI.color = new Color(0.02f, 0.05f, 0.1f, 0.88f);
-                                GUI.Box(new Rect(mPos.x + 14f, mPos.y - 12f, 185f, 28f), GUIContent.none);
-                                GUI.color = new Color(0.2f, 1f, 0.6f);
-                                GUI.Label(new Rect(mPos.x + 20f, mPos.y - 8f, 175f, 20f), "🧬 [Tıkla: DNA Terminali]", EditorBold(11));
-                                GUI.color = Color.white;
-                            }
-                        }
-                    }
+                    // Laboratuvardayken ekranda alt buton gösterilmez. Masadaki tablete tıklandığında veya [T] tuşuna basıldığında açılır.
+                    return;
                 }
-                return;
+                else
+                {
+                    // Tablet aktif: Oyun içi dokunmatik tablet ekranını çiz!
+                    RenderTabletPuzzleScreen(Screen.width, Screen.height);
+                    return;
+                }
             }
 
             float screenW = Screen.width;
             float screenH = Screen.height;
 
-            if (isLabMode && isTerminalActive)
-            {
-                GUI.backgroundColor = new Color(0.85f, 0.25f, 0.25f, 0.95f);
-                if (GUI.Button(new Rect(screenW - 195f, 10f, 180f, 36f), "↩️ ODAYA DÖN (ESC)", EditorBold(12)))
-                {
-                    ReturnToLabRoom();
-                    return;
-                }
-                GUI.backgroundColor = Color.white;
-            }
-
             // Tam Ekran Genom Biyo-Onarım & İnceleme Modu
             if (isRepairZoomMode && zoomedGenome != null)
             {
                 RenderRepairZoomHUD(screenW, screenH);
+                if (showRulebookModal)
+                {
+                    DrawLacunaRulebookModal(screenW, screenH);
+                }
                 return;
             }
 
@@ -1929,72 +2367,81 @@ namespace DNAPuzzle
                 planets = DNAPuzzleSampleData.CreateSamplePlanets();
 
             PlanetData planet = manager != null ? manager.CurrentPlanet : null;
+            var creatures = LacunaGeneticsDatabase.GetCreatures();
+            currentCreatureIdx = Mathf.Clamp(currentCreatureIdx, 0, creatures.Count - 1);
+            var curCreature = creatures[currentCreatureIdx];
+            string curPlanetName = currentPlanetIdx == 1 ? "SNIBBLEX" : (currentPlanetIdx == 2 ? "OOMGARTH" : "FABAUP");
+            var lacunaPlanetDef = LacunaGeneticsDatabase.GetPlanet(curPlanetName);
 
             int targetPlanetIdx = -1;
+            int targetCreatureIdx = -1;
             bool triggerTestSim = false;
             bool triggerClearStrand = false;
 
-            // 1. Üst Bar: Başlık, Canlı Gereksinimleri & Gezegen Butonları
-            GUILayout.BeginArea(new Rect(18, 8, screenW - 36, 38));
+            // 1. Üst Bar: Başlık, Canlı Seçici, Kural Kitabı & Gezegen Butonları
+            GUILayout.BeginArea(new Rect(14, 8, screenW - 28, 38));
             GUILayout.BeginHorizontal();
 
-            GUI.color = new Color(0.35f, 0.9f, 1f);
-            GUILayout.Label("🔬 BİYO-MÜHENDİSLİK LABORATUVARI // GENOM TERMİNALİ", EditorBold(13));
+            GUI.color = new Color(0.35f, 0.95f, 1f);
+            GUILayout.Label("🧬 LACUNA GENETICS // 3D SARMAL", EditorBold(13));
             GUI.color = Color.white;
 
-            if (planet != null && manager != null)
+            GUILayout.Space(8);
+            GUI.backgroundColor = new Color(0.18f, 0.28f, 0.45f);
+            if (GUILayout.Button("◀", EditorBold(11), GUILayout.Width(28), GUILayout.Height(26)))
             {
-                GUILayout.Space(14);
-                var curStats = manager.CalculateTotalStats();
-                int curEnergy = manager.CalculateTotalEnergy();
-                bool energyOk = curEnergy <= planet.maxEnergyBudget;
-
-                GUI.color = energyOk ? new Color(0.3f, 1f, 0.5f) : new Color(1f, 0.35f, 0.35f);
-                GUILayout.Label($"⚡ {curEnergy}/{planet.maxEnergyBudget}E", EditorBold(12));
-
-                GUI.color = new Color(0.55f, 0.65f, 0.75f);
-                GUILayout.Label("•", EditorBold(12));
-
-                foreach (var req in planet.requirements)
-                {
-                    int val = curStats.ContainsKey(req.stat) ? curStats[req.stat] : 0;
-                    bool ok = val >= req.requiredValue;
-                    GUI.color = ok ? new Color(0.3f, 1f, 0.5f) : new Color(1f, 0.45f, 0.45f);
-                    string sName = DNAHelper.GetStatDisplayName(req.stat)
-                        .Replace("Direnci", "")
-                        .Replace("Dayanımı", "")
-                        .Replace("Kalkanı", "")
-                        .Replace("Filtresi", "")
-                        .Trim();
-                    GUILayout.Label($"{sName}: {val}/{req.requiredValue}{(ok ? "✔" : "")}", EditorBold(12));
-                }
-                GUI.color = Color.white;
+                targetCreatureIdx = (currentCreatureIdx - 1 + creatures.Count) % creatures.Count;
+            }
+            GUI.backgroundColor = new Color(0.12f, 0.22f, 0.36f);
+            GUILayout.Box($"#{curCreature.creatureNumber}/10 {curCreature.creatureName} ({curCreature.targetPlanet})", EditorBold(11), GUILayout.Height(26), GUILayout.Width(175));
+            GUI.backgroundColor = new Color(0.18f, 0.28f, 0.45f);
+            if (GUILayout.Button("▶", EditorBold(11), GUILayout.Width(28), GUILayout.Height(26)))
+            {
+                targetCreatureIdx = (currentCreatureIdx + 1) % creatures.Count;
             }
 
-            GUILayout.FlexibleSpace();
+            GUILayout.Space(6);
+            GUI.backgroundColor = showRulebookModal ? new Color(0.2f, 0.9f, 0.55f) : new Color(0.95f, 0.68f, 0.15f);
+            if (GUILayout.Button("📖 KURAL KİTABI (20 GENOM)", EditorBold(11), GUILayout.Height(26), GUILayout.Width(182)))
+            {
+                showRulebookModal = !showRulebookModal;
+                audioManager?.PlaySnap();
+            }
+            GUI.backgroundColor = Color.white;
 
-            GUI.color = new Color(1f, 0.88f, 0.2f);
-            GUILayout.Label($"⭐ {ProgressionManager.GetTotalStars()}/9", EditorBold(12));
-            GUI.color = Color.white;
-            GUILayout.Space(8);
+            GUILayout.FlexibleSpace();
 
             for (int i = 0; i < planets.Count; i++)
             {
                 bool isSel = (i == currentPlanetIdx);
-                GUI.color = isSel ? Color.cyan : new Color(0.7f, 0.7f, 0.7f);
-                string shortPName = i == 0 ? "🔥 ODA-1 Pyros" : (i == 1 ? "❄️ ODA-2 Cryo" : "☣️ ODA-3 Toxis");
-                string stars = ProgressionManager.FormatStarString(ProgressionManager.GetStars(i));
+                GUI.backgroundColor = isSel ? new Color(0.15f, 0.78f, 0.98f) : new Color(0.22f, 0.28f, 0.38f);
+                string shortPName = i == 0 ? "🔥 FABAUP" : (i == 1 ? "❄️ SNIBBLEX" : "☣️ OOMGARTH");
 
-                if (GUILayout.Button($"{shortPName} {stars}", GUILayout.Height(26), GUILayout.Width(130)))
+                if (GUILayout.Button(shortPName, EditorBold(11), GUILayout.Height(26), GUILayout.Width(112)))
                 {
                     targetPlanetIdx = i;
                 }
             }
-            GUI.color = Color.white;
+            GUI.backgroundColor = Color.white;
+
+            if (isLabMode && isTerminalActive)
+            {
+                GUILayout.Space(6);
+                GUI.backgroundColor = new Color(0.85f, 0.25f, 0.25f, 0.95f);
+                if (GUILayout.Button("↩️ ODAYA DÖN", EditorBold(11), GUILayout.Height(26), GUILayout.Width(115)))
+                {
+                    GUILayout.EndHorizontal();
+                    GUILayout.EndArea();
+                    ReturnToLabRoom();
+                    return;
+                }
+                GUI.backgroundColor = Color.white;
+            }
+
             GUILayout.EndHorizontal();
             GUILayout.EndArea();
 
-            // 1.5. Orta Rehber & Onarım Bildirim Alanı
+            // 1.5. Orta Rehber, Gezegen Kuralları & Onarım Bildirim Alanı
             int repairedCount = 0;
             int deformedCount = 0;
             foreach (var p in poolPieces)
@@ -2006,22 +2453,29 @@ namespace DNAPuzzle
                 }
             }
 
-            float bannerW = Mathf.Min(680f, screenW - 320f);
-            float bannerX = 20f;
-            GUILayout.BeginArea(new Rect(bannerX, 48, bannerW, 44));
+            float bannerW = Mathf.Min(760f, screenW - 310f);
+            float bannerX = 18f;
+            GUILayout.BeginArea(new Rect(bannerX, 44, bannerW, 56));
             GUILayout.BeginVertical();
 
             string stepTitle = (repairedCount < 4)
                 ? (deformedCount > 0 
-                    ? $"🛠️ 1. ADIM: GENOMLARI ONAR ({repairedCount}/4 Hazır, ☣️ {deformedCount} Genom Yandı!)"
-                    : $"🛠️ 1. ADIM: BOZUK GENOMLARI ONAR ({repairedCount}/4 Hazır)")
-                : "🎉 2. ADIM: TÜM GENOMLAR ONARILDI! Tıklayarak Ana DNA Sarmalına yerleştirin.";
+                    ? $"🛠️ 1. ADIM: GENOMLARI ONAR ({repairedCount}/4 Hazır, ☣️ {deformedCount} Genom Yandı!) — Eşlenik: ●↔■ ve ▲↔◆"
+                    : $"🛠️ 1. ADIM: BOZUK GENOMLARI ONAR ({repairedCount}/4 Hazır) — Eşlenik Kuralı: ●↔■  ve  ▲↔◆")
+                : "🎉 2. ADIM: GENOMLARI GEZEGEN KURALINA GÖRE DÜZENLE VE SARMALA YERLEŞTİR!";
             Color stepCol = (deformedCount > 0) ? new Color(1f, 0.35f, 0.25f) :
-                            (repairedCount < 4) ? new Color(1f, 0.75f, 0.2f) : new Color(0.3f, 1f, 0.5f);
+                            (repairedCount < 4) ? new Color(1f, 0.78f, 0.25f) : new Color(0.3f, 1f, 0.55f);
 
             GUI.color = stepCol;
-            GUILayout.Label(stepTitle, EditorBold(12));
-            GUI.color = new Color(0.85f, 0.95f, 1f);
+            GUILayout.Label(stepTitle, EditorBold(11));
+
+            if (lacunaPlanetDef != null)
+            {
+                GUI.color = new Color(0.45f, 0.92f, 1f);
+                GUILayout.Label($"🌍 {lacunaPlanetDef.planetName} KURALI: Deri={lacunaPlanetDef.skinRuleTR} • Boy={lacunaPlanetDef.heightRuleTR} • Göz={lacunaPlanetDef.eyesRuleTR} • Uzuv={lacunaPlanetDef.limbsRuleTR}", EditorBold(10));
+            }
+
+            GUI.color = new Color(0.88f, 0.95f, 1f);
             GUILayout.Label(repairFeedbackMessage, EditorLabel(11));
             GUI.color = Color.white;
 
@@ -2067,17 +2521,21 @@ namespace DNAPuzzle
                     GUI.backgroundColor = Color.white;
                 }
 
-                // Aktif Sinerjiler Listesi
-                var activeSyns = manager.GetActiveSynergies();
-                if (activeSyns != null && activeSyns.Count > 0)
+                // 4 Slotun Gezegen Uygunluk Özeti
+                if (lacunaPlanetDef != null)
                 {
                     GUILayout.Space(6);
-                    GUI.color = new Color(0.3f, 1f, 0.7f);
-                    GUILayout.Label("⚡ AKTİF SİNERJİLER:", EditorBold(11));
-                    foreach (var syn in activeSyns)
+                    GUI.color = new Color(0.35f, 0.95f, 1f);
+                    GUILayout.Label($"🧬 {lacunaPlanetDef.planetName} SLOT KONTROLÜ:", EditorBold(11));
+                    for (int s = 0; s < poolPieces.Count; s++)
                     {
-                        GUI.color = syn.auraColor;
-                        GUILayout.Label($"• {syn.synergyName}", EditorBold(10));
+                        var gp = poolPieces[s]?.Data;
+                        if (gp == null) continue;
+                        bool ok = lacunaPlanetDef.IsGeneAcceptable(gp.lacunaSlot, gp.geneName);
+                        bool rep = gp.isRepaired || !gp.isBroken;
+                        GUI.color = !rep ? new Color(1f, 0.75f, 0.25f) : (ok ? new Color(0.25f, 1f, 0.5f) : new Color(1f, 0.35f, 0.35f));
+                        string stateStr = !rep ? "🛠️ Onarılmalı" : (ok ? "✔ Uygun" : "❌ Değiştirilmeli!");
+                        GUILayout.Label($"• Slot {gp.lacunaSlot}: {gp.geneName} ({stateStr})", EditorBold(10));
                     }
                     GUI.color = Color.white;
                 }
@@ -2101,7 +2559,7 @@ namespace DNAPuzzle
             }
 
             // 3. Alt Bilgilendirme ve Rehber Barı (Sade, Ferah, Tek Alan)
-            float bottomW = Mathf.Min(840f, screenW - 40f);
+            float bottomW = Mathf.Min(860f, screenW - 40f);
             GUILayout.BeginArea(new Rect((screenW - bottomW) * 0.5f, screenH - 32f, bottomW, 26f));
             if (hoveredGenePiece != null && hoveredGenePiece.Data != null)
             {
@@ -2114,13 +2572,15 @@ namespace DNAPuzzle
                 else
                 {
                     GUI.color = new Color(1f, 0.95f, 0.4f);
-                    GUILayout.Label($"🔬 {g.geneName} ({DNAHelper.GetCategoryDisplayName(g.category)}): {g.description} [⚡{g.energyCost}E | {g.leftConnector}⟷{g.rightConnector}]", EditorBold(11));
+                    string lSym = DNAHelper.GetNucleotideSymbol(g.leftConnector);
+                    string rSym = DNAHelper.GetNucleotideSymbol(g.rightConnector);
+                    GUILayout.Label($"🔬 {g.geneName} (SLOT {g.lacunaSlot}): {g.lacunaTraitTR} | Dizilim: {g.GetLacunaTopSequenceString()} [Uçlar: {lSym}⟷{rSym}]", EditorBold(11));
                 }
             }
             else
             {
                 GUI.color = new Color(0.40f, 0.88f, 1f);
-                GUILayout.Label("💡 REHBER: 1. Bozuk genoma tıkla  ➜  2. Alttan doğru bazı seç (A↔T, C↔G)  ➜  3. Sarmala yerleştir!", EditorBold(11));
+                GUILayout.Label($"💡 İPUCU ({curCreature.creatureName}): \"{curCreature.landlordClueTR}\"  |  Eşlenik: ●↔■ ve ▲↔◆", EditorBold(11));
             }
             GUI.color = Color.white;
             GUILayout.EndArea();
@@ -2130,7 +2590,7 @@ namespace DNAPuzzle
             AnimatedGenePiece quickEditPiece = null;
             AnimatedGenePiece quickUnequipPiece = null;
             Camera cam = puzzleCamera != null ? puzzleCamera : Camera.main;
-            if (cam != null && !isSimulating && !showSynthesisModal)
+            if (cam != null && !isSimulating && !showSynthesisModal && !showRulebookModal)
             {
                 for (int i = 0; i < poolPieces.Count; i++)
                 {
@@ -2206,7 +2666,12 @@ namespace DNAPuzzle
             }
 
             // Buton eylemlerini GUILayout alanları tamamen bittikten sonra güvenle çalıştır
-            if (targetPlanetIdx >= 0)
+            if (targetCreatureIdx >= 0)
+            {
+                audioManager?.PlaySnap();
+                LoadCreature(targetCreatureIdx);
+            }
+            else if (targetPlanetIdx >= 0)
             {
                 if (targetPlanetIdx != currentPlanetIdx)
                 {
@@ -2221,6 +2686,29 @@ namespace DNAPuzzle
 
             if (triggerTestSim && planet != null)
             {
+                // Lacuna Genetics Gezegen Kuralları + 3D Kuluçka Odası Canlı Sentezi
+                string zGene = poolPieces.Count > 0 && poolPieces[0]?.Data != null ? poolPieces[0].Data.geneName : curCreature.startGeneZ;
+                string vGene = poolPieces.Count > 1 && poolPieces[1]?.Data != null ? poolPieces[1].Data.geneName : curCreature.startGeneV;
+                string kGene = poolPieces.Count > 2 && poolPieces[2]?.Data != null ? poolPieces[2].Data.geneName : curCreature.startGeneK;
+                string pGene = poolPieces.Count > 3 && poolPieces[3]?.Data != null ? poolPieces[3].Data.geneName : curCreature.startGeneP;
+
+                bool allRepaired = true;
+                foreach (var pp in poolPieces)
+                {
+                    if (pp != null && pp.Data != null && ((pp.Data.isBroken && !pp.Data.isRepaired) || pp.Data.isDeformed))
+                    {
+                        allRepaired = false;
+                    }
+                }
+
+                bool zOk = lacunaPlanetDef == null || lacunaPlanetDef.IsGeneAcceptable(LacunaSlotType.Z, zGene);
+                bool vOk = lacunaPlanetDef == null || lacunaPlanetDef.IsGeneAcceptable(LacunaSlotType.V, vGene);
+                bool kOk = lacunaPlanetDef == null || lacunaPlanetDef.IsGeneAcceptable(LacunaSlotType.K, kGene);
+                bool pOk = lacunaPlanetDef == null || lacunaPlanetDef.IsGeneAcceptable(LacunaSlotType.P, pGene);
+                bool lacunaSuccess = allRepaired && zOk && vOk && kOk && pOk;
+
+                SpawnLacunaCreatureInLabChamber(curCreature.creatureName, curPlanetName, zGene, vGene, kGene, pGene);
+
                 lastEvaluation = null;
                 simulator.StartSimulation(manager);
                 if (dropCinematic != null && creatureEgg != null)
@@ -2254,6 +2742,12 @@ namespace DNAPuzzle
             if (showSynthesisModal && lastSynthesizedCreature != null && lastSynthesizedCreature.isValid && lastSynthesizedCreature.phenotype != null)
             {
                 DrawCreatureSynthesisModal(screenW, screenH);
+            }
+
+            // Lacuna Genetics 20 Genom Kural Kitabı Modalı
+            if (showRulebookModal)
+            {
+                DrawLacunaRulebookModal(screenW, screenH);
             }
         }
 
@@ -2396,21 +2890,26 @@ namespace DNAPuzzle
             if (zoomedGenome == null || zoomedGenome.Data == null) return;
             var data = zoomedGenome.Data;
 
+            string curPlanetName = currentPlanetIdx == 1 ? "SNIBBLEX" : (currentPlanetIdx == 2 ? "OOMGARTH" : "FABAUP");
+            var lacunaPlanetDef = LacunaGeneticsDatabase.GetPlanet(curPlanetName);
+            bool isPlanetAcceptable = lacunaPlanetDef == null || lacunaPlanetDef.IsGeneAcceptable(data.lacunaSlot, data.geneName);
+
             bool triggerClose = false;
             bool triggerEquip = false;
             bool triggerResetRepair = false;
             bool triggerPurify = false;
             AnimatedGenePiece nextBrokenToZoom = null;
+            LacunaGeneDefinition targetTransformGene = null;
 
-            // 1. Üst Laboratuvar Başlık Çubuğu + Tüm 4 Genom İçin Hızlı Geçiş Sekmeleri (Onarılanlar ve Sarmaldakiler Dahil!)
-            GUILayout.BeginArea(new Rect(20, 10, screenW - 40, 42));
+            // 1. Üst Laboratuvar Başlık Çubuğu + Tüm 4 Genom İçin Hızlı Geçiş Sekmeleri
+            GUILayout.BeginArea(new Rect(18, 8, screenW - 36, 38));
             GUILayout.BeginHorizontal();
 
             GUI.color = new Color(0.35f, 0.9f, 1f);
-            GUILayout.Label("🔬 GENOM ONARIM & DÜZENLEME LABI", EditorBold(13));
+            GUILayout.Label($"🔬 3D GENOM DÜZENLEME // SLOT {data.lacunaSlot}", EditorBold(13));
             GUI.color = Color.white;
 
-            GUILayout.Space(10);
+            GUILayout.Space(8);
             for (int i = 0; i < poolPieces.Count; i++)
             {
                 var p = poolPieces[i];
@@ -2418,23 +2917,33 @@ namespace DNAPuzzle
                 bool isCur = (p == zoomedGenome);
                 bool isRep = p.Data.isRepaired || !p.Data.isBroken;
                 bool isDef = p.Data.isDeformed;
+                bool slotOk = lacunaPlanetDef == null || lacunaPlanetDef.IsGeneAcceptable(p.Data.lacunaSlot, p.Data.geneName);
 
-                string badge = isDef ? "☣️" : (p.IsEquipped ? "🔗" : (isRep ? "✅" : "🛠️"));
+                string badge = isDef ? "☣️" : (!isRep ? "🛠️" : (slotOk ? "✅" : "⚠️"));
                 Color tabCol = isCur ? new Color(0.2f, 0.8f, 1f) : 
                                (isDef ? new Color(0.75f, 0.15f, 0.25f) : 
-                               (isRep ? new Color(0.2f, 0.55f, 0.35f) : new Color(0.45f, 0.3f, 0.2f)));
+                               (!isRep ? new Color(0.55f, 0.35f, 0.18f) :
+                               (slotOk ? new Color(0.18f, 0.58f, 0.35f) : new Color(0.75f, 0.45f, 0.15f))));
                 GUI.backgroundColor = tabCol;
-                if (GUILayout.Button($"{badge} {p.Data.geneName}", GUILayout.Height(26), GUILayout.Width(132)))
+                if (GUILayout.Button($"{badge} Slot {p.Data.lacunaSlot}: {p.Data.geneName}", EditorBold(11), GUILayout.Height(26), GUILayout.Width(142)))
                 {
                     if (!isCur) nextBrokenToZoom = p;
                 }
             }
             GUI.backgroundColor = Color.white;
 
+            GUILayout.Space(6);
+            GUI.backgroundColor = showRulebookModal ? new Color(0.2f, 0.9f, 0.55f) : new Color(0.95f, 0.68f, 0.15f);
+            if (GUILayout.Button("📖 KURAL KİTABI", EditorBold(11), GUILayout.Height(26), GUILayout.Width(135)))
+            {
+                showRulebookModal = !showRulebookModal;
+                audioManager?.PlaySnap();
+            }
+
             GUILayout.FlexibleSpace();
 
             GUI.backgroundColor = new Color(0.85f, 0.25f, 0.25f);
-            if (GUILayout.Button("✕ KAPAT", GUILayout.Height(30), GUILayout.Width(100)))
+            if (GUILayout.Button("✕ KAPAT", EditorBold(11), GUILayout.Height(28), GUILayout.Width(95)))
             {
                 triggerClose = true;
             }
@@ -2443,42 +2952,131 @@ namespace DNAPuzzle
             GUILayout.EndHorizontal();
             GUILayout.EndArea();
 
-            // 2. Teşhis ve Hasar Kartı (Üst Orta)
-            float cardW = Mathf.Min(740, screenW - 40);
+            // 2. Teşhis, Dizilim ve Gezegen Uygunluk Kartı (Üst Orta)
+            float cardW = Mathf.Min(820, screenW - 36);
             float cardX = (screenW - cardW) * 0.5f;
-            GUILayout.BeginArea(new Rect(cardX, 52, cardW, 64), "box");
+            GUILayout.BeginArea(new Rect(cardX, 48, cardW, 60), "box");
             GUILayout.BeginVertical();
+
+            string seqStr = $"Üst: [{data.GetLacunaTopSequenceString()}]  •  Alt: [{data.GetLacunaBottomSequenceString()}]";
 
             if (data.isDeformed)
             {
                 GUI.color = new Color(1f, 0.25f, 0.25f);
-                GUILayout.Label($"☣️ AŞIRI YÜKLENME HASARI: {data.geneName} BİYOLOJİK OLARAK YANDI!", EditorBold(12));
+                GUILayout.Label($"☣️ AŞIRI YÜKLENME HASARI: {data.geneName} (SLOT {data.lacunaSlot}) BİYOLOJİK OLARAK YANDI!", EditorBold(12));
                 GUI.color = new Color(1f, 0.85f, 0.45f);
-                GUILayout.Label($"Kalan Biyo-Bütünlük: 🖤🖤🖤 (0/3 Hak Tükendi)  |  ⚠️ Bu bozuk gen sarmala takılırsa İSTENMEYEN BİR HİLKAT GARİBESİ doğar!", EditorLabel(11));
+                GUILayout.Label($"Kalan Biyo-Bütünlük: 🖤🖤🖤 (0/3 Hak)  |  ⚠️ Yeni baz denemek için alttan 'Genomu Arındır & Sıfırla' butonuna tıklayın.", EditorLabel(11));
             }
             else if (data.isRepaired || !data.isBroken)
             {
-                GUI.color = new Color(0.3f, 1f, 0.5f);
-                GUILayout.Label($"✅ GENOM BÜTÜNLÜĞÜ SAĞLANDI! {data.geneName} aktif ve kusursuz.", EditorBold(12));
+                GUI.color = isPlanetAcceptable ? new Color(0.25f, 1f, 0.5f) : new Color(1f, 0.72f, 0.2f);
+                string planetStatus = isPlanetAcceptable
+                    ? $"✔ {curPlanetName} GEZEGENİ İÇİN UYGUN!"
+                    : $"⚠️ {curPlanetName} İÇİN UYGUNSUZ GEN! Aşağıdaki Slot {data.lacunaSlot} genlerinden uygun olana dönüştürün!";
+                GUILayout.Label($"✅ EŞLENİK BÜTÜNLÜĞÜ TAMAM: {data.geneName} ({data.lacunaTraitTR})  |  {planetStatus}", EditorBold(11));
                 GUI.color = new Color(0.85f, 0.95f, 1f);
-                GUILayout.Label($"Statlar: {data.GetStatsSummary()}  |  Metabolik Enerji: {data.energyCost}E  |  Biyo-Bütünlük: ❤️❤️❤️ (3/3 Hak)", EditorLabel(11));
+                GUILayout.Label($"Dizilim: {seqStr}  |  Eşlenik Kuralı: ●↔■ ve ▲↔◆", EditorLabel(11));
             }
             else
             {
                 GUI.color = new Color(1f, 0.45f, 0.2f);
-                GUILayout.Label($"⚠️ HASAR TESPİTİ: {data.defectDescription}", EditorBold(12));
+                GUILayout.Label($"⚠️ HASAR TESPİTİ: {data.defectDescription}  |  {data.repairHint}", EditorBold(11));
                 GUI.color = new Color(0.4f, 0.9f, 1f);
                 string hearts = "";
                 for (int h = 0; h < data.maxRepairAttempts; h++)
                 {
                     hearts += (h < data.remainingRepairAttempts) ? "❤️" : "🖤";
                 }
-                GUILayout.Label($"🛡️ BİYO-BÜTÜNLÜK: {hearts} ({data.remainingRepairAttempts}/3 Hak)  |  💡 İPUCU: {data.repairHint}", EditorBold(11));
+                GUILayout.Label($"🛡️ BİYO-BÜTÜNLÜK: {hearts} ({data.remainingRepairAttempts}/3 Hak)  |  Dizilim: {seqStr}", EditorBold(11));
             }
             GUI.color = Color.white;
 
             GUILayout.EndVertical();
             GUILayout.EndArea();
+
+            // 2.5. SLOT GENOM DÖNÜŞTÜRÜCÜ BAR (Kılavuzdaki 5 Gen Arasında Dönüştürme / Yanlış Geni Düzeltme)
+            var slotGenes = LacunaGeneticsDatabase.GetGenesBySlot(data.lacunaSlot);
+            var curGeneDef = LacunaGeneticsDatabase.GetGene(data.geneName);
+            if (slotGenes != null && slotGenes.Count > 0)
+            {
+                GUILayout.BeginArea(new Rect(cardX, 110, cardW, 44), "box");
+                GUILayout.BeginHorizontal();
+
+                GUI.color = new Color(1f, 0.88f, 0.3f);
+                GUILayout.Label($"🧬 SLOT {data.lacunaSlot} GENLERİ:", EditorBold(10), GUILayout.Width(105));
+                GUI.color = Color.white;
+
+                bool canMutate = (data.isRepaired || !data.isBroken) && !data.isDeformed;
+
+                for (int gIdx = 0; gIdx < slotGenes.Count; gIdx++)
+                {
+                    var sg = slotGenes[gIdx];
+                    bool isCurrent = (sg.geneName == data.geneName);
+                    bool isAcceptable = lacunaPlanetDef == null || lacunaPlanetDef.IsGeneAcceptable(sg.slot, sg.geneName);
+                    int diff = (curGeneDef != null) ? LacunaGeneticsDatabase.CountPairDifferences(curGeneDef, sg) : 1;
+
+                    if (isCurrent)
+                        GUI.backgroundColor = new Color(0.18f, 0.78f, 1f);
+                    else if (isAcceptable)
+                        GUI.backgroundColor = new Color(0.18f, 0.65f, 0.38f);
+                    else
+                        GUI.backgroundColor = new Color(0.32f, 0.36f, 0.45f);
+
+                    string diffTag = isCurrent ? "Aktif" : $"{diff}ç fark";
+                    string okMark = isAcceptable ? "✔" : "";
+                    string btnLabel = $"{sg.geneName}{okMark} ({diffTag})";
+
+                    if (GUILayout.Button(btnLabel, EditorBold(10), GUILayout.Height(28)))
+                    {
+                        if (!isCurrent)
+                        {
+                            targetTransformGene = sg;
+                        }
+                    }
+                }
+                GUI.backgroundColor = Color.white;
+
+                GUILayout.EndHorizontal();
+                GUILayout.EndArea();
+            }
+
+            // 2.6. BAZ ÇİFTLERİ SEÇİCİ BAR (İstediğin Çifte Tıklayarak Seç ve Alttan Değiştir)
+            if (data.isLacunaGene && data.lacunaTopStrand != null && data.lacunaTopStrand.Length > 0)
+            {
+                GUILayout.BeginArea(new Rect(cardX, 156, cardW, 36), "box");
+                GUILayout.BeginHorizontal();
+
+                GUI.color = new Color(0.35f, 0.95f, 1f);
+                GUILayout.Label("🔬 ÇİFT DÜZENLE:", EditorBold(10), GUILayout.Width(105));
+                GUI.color = Color.white;
+
+                for (int r = 0; r < data.lacunaTopStrand.Length; r++)
+                {
+                    bool isSel = (data.selectedEditRungIndex == r);
+                    bool isGap = (data.lacunaTopStrand[r] == LacunaShape.None);
+                    string symTop = LacunaGeneticsDatabase.GetSymbol(data.lacunaTopStrand[r]);
+                    string symBot = (data.lacunaBottomStrand != null && r < data.lacunaBottomStrand.Length)
+                        ? LacunaGeneticsDatabase.GetSymbol(data.lacunaBottomStrand[r]) : "?";
+
+                    if (isSel)
+                        GUI.backgroundColor = new Color(0.2f, 0.95f, 1f);
+                    else if (isGap)
+                        GUI.backgroundColor = new Color(1f, 0.5f, 0.15f);
+                    else
+                        GUI.backgroundColor = new Color(0.28f, 0.35f, 0.46f);
+
+                    string rungLabel = $"#{r + 1} [{symTop}/{symBot}]";
+                    if (GUILayout.Button(rungLabel, EditorBold(10), GUILayout.Height(24)))
+                    {
+                        data.selectedEditRungIndex = r;
+                        audioManager?.PlaySnap();
+                    }
+                }
+                GUI.backgroundColor = Color.white;
+
+                GUILayout.EndHorizontal();
+                GUILayout.EndArea();
+            }
 
             // 3. Alt Aksiyon Alanı
             if (data.isDeformed)
@@ -2565,12 +3163,12 @@ namespace DNAPuzzle
             else
             {
                 // Bozuk -> Alttan parça seçme yönlendirmesi
-                float hintW = 680;
+                float hintW = 720;
                 float hintX = (screenW - hintW) * 0.5f;
                 GUI.color = new Color(0.35f, 0.95f, 1f);
                 string hearts = "";
                 for (int h = 0; h < data.maxRepairAttempts; h++) hearts += (h < data.remainingRepairAttempts) ? "❤️" : "🖤";
-                GUI.Label(new Rect(hintX, screenH - 42f, hintW, 24), $"▼ ALTTAN DOĞRU BAZ KAPSÜLÜNE TIKLAYARAK GENOMU ONARIN | Kalan Hak: {hearts} ({data.remainingRepairAttempts}/3) ▼", EditorBold(11));
+                GUI.Label(new Rect(hintX, screenH - 42f, hintW, 24), $"▼ ALTTAKİ 3D BAZ KAPSÜLLERİNDEN (●↔■, ▲↔◆) DOĞRU OLANINA TIKLAYARAK ONARIN | Hak: {hearts} ▼", EditorBold(11));
                 GUI.color = Color.white;
             }
 
@@ -2590,7 +3188,16 @@ namespace DNAPuzzle
             }
 
             // GUILayout bittikten sonra eylemleri güvenle çalıştır
-            if (triggerPurify && zoomedGenome != null)
+            if (targetTransformGene != null && zoomedGenome != null)
+            {
+                string prevName = zoomedGenome.Data.geneName;
+                zoomedGenome.TransformToLacunaGene(targetTransformGene);
+                audioManager?.PlayResonance();
+                audioManager?.PlaySnap();
+                repairFeedbackMessage = $"🧬 DÖNÜŞTÜRÜLDÜ! {prevName} ➔ {targetTransformGene.geneName} ({targetTransformGene.traitDescriptionTR})!";
+                RefreshAllStates();
+            }
+            else if (triggerPurify && zoomedGenome != null)
             {
                 zoomedGenome.PurifyAndResetDeformed();
                 audioManager?.PlaySnap();
@@ -2614,6 +3221,93 @@ namespace DNAPuzzle
             {
                 EnterRepairZoomMode(nextBrokenToZoom);
             }
+        }
+
+        private void DrawLacunaRulebookModal(float screenW, float screenH)
+        {
+            float modalW = Mathf.Min(860f, screenW - 36f);
+            float modalH = Mathf.Min(560f, screenH - 36f);
+            float modalX = (screenW - modalW) * 0.5f;
+            float modalY = (screenH - modalH) * 0.5f;
+
+            GUI.color = new Color(0.02f, 0.04f, 0.09f, 0.98f);
+            GUI.Box(new Rect(modalX, modalY, modalW, modalH), GUIContent.none, EditorBox());
+            GUI.color = Color.white;
+
+            GUILayout.BeginArea(new Rect(modalX + 16f, modalY + 12f, modalW - 32f, modalH - 24f));
+
+            GUILayout.BeginHorizontal();
+            GUI.color = new Color(1f, 0.85f, 0.25f);
+            GUILayout.Label("📖 LACUNA GENETICS — LABORATUVAR EL KİTABI (20 GENOM & EŞLENİK KURALLARI)", EditorBold(14));
+            GUI.color = Color.white;
+            GUILayout.FlexibleSpace();
+            GUI.backgroundColor = new Color(0.85f, 0.25f, 0.25f);
+            if (GUILayout.Button("✕ KAPAT", EditorBold(11), GUILayout.Width(90), GUILayout.Height(26)))
+            {
+                showRulebookModal = false;
+                audioManager?.PlaySnap();
+            }
+            GUI.backgroundColor = Color.white;
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(6);
+            GUI.color = new Color(0.35f, 0.95f, 1f);
+            GUILayout.Label("🔗 BAZ EŞLENİK KURALI:   ● (Daire)  ↔  ■ (Kare)     |     ▲ (Üçgen)  ↔  ◆ (Elmas)", EditorBold(12));
+            GUI.color = Color.white;
+
+            GUILayout.Space(4);
+            rulebookScrollPos = GUILayout.BeginScrollView(rulebookScrollPos);
+
+            // 3 Gezegen Kuralları
+            GUILayout.BeginVertical("box");
+            GUI.color = new Color(1f, 0.78f, 0.25f);
+            GUILayout.Label("🌍 GEZEGEN KABUL KURALLARI (FABAUP • SNIBBLEX • OOMGARTH)", EditorBold(12));
+            GUI.color = Color.white;
+            foreach (var p in LacunaGeneticsDatabase.GetPlanets())
+            {
+                GUI.color = p.themeColor;
+                GUILayout.Label($"• {p.planetName} ({p.subtitleTR}): Deri={p.skinRuleTR}  |  Boy={p.heightRuleTR}  |  Göz={p.eyesRuleTR}  |  Uzuv={p.limbsRuleTR}", EditorBold(11));
+            }
+            GUI.color = Color.white;
+            GUILayout.EndVertical();
+
+            GUILayout.Space(6);
+
+            // 4 Slot ve 20 Genom
+            LacunaSlotType[] slots = { LacunaSlotType.Z, LacunaSlotType.V, LacunaSlotType.K, LacunaSlotType.P };
+            string[] rankOrders = {
+                "Sıralama (Küçükten Büyüğe): ZUUN (1) < ZIMMOK (2) < ZEMBO (3) < ZORP (4) < ZAKKO (5)",
+                "Sıralama (Azdan Çoğa): VIXX (0) < VOLM (1) < VESHI (2) < VARQ (3) < VUNDO (4)",
+                "Sıralama Yok (Renk Bazlı): KRELL (Turuncu), KUPPA (Sarı), KOSH (Beyaz), KIMBO (Camgöbeği), KLOOT (Mor)",
+                "Sıralama (Azdan Çoğa): PHELM (0) < PONDO (1) < PLORT (2) < PUNKO (3) < PRIZZ (4)"
+            };
+
+            for (int s = 0; s < slots.Length; s++)
+            {
+                GUILayout.BeginVertical("box");
+                GUI.color = new Color(0.35f, 0.95f, 1f);
+                GUILayout.Label($"🧬 {LacunaGeneticsDatabase.GetSlotHeaderTR(slots[s])}  —  {rankOrders[s]}", EditorBold(11));
+                GUI.color = Color.white;
+
+                var gList = LacunaGeneticsDatabase.GetGenesBySlot(slots[s]);
+                foreach (var g in gList)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUI.color = g.displayColor;
+                    GUILayout.Label($"• {g.geneName}", EditorBold(11), GUILayout.Width(90));
+                    GUI.color = new Color(0.85f, 0.92f, 1f);
+                    GUILayout.Label($"{g.traitDescriptionTR}", EditorLabel(11), GUILayout.Width(175));
+                    GUI.color = new Color(0.4f, 1f, 0.65f);
+                    GUILayout.Label($"Üst: {g.FormatTopSequence()}   |   Alt: {g.FormatBottomSequence()}", EditorBold(11));
+                    GUILayout.EndHorizontal();
+                }
+                GUI.color = Color.white;
+                GUILayout.EndVertical();
+                GUILayout.Space(4);
+            }
+
+            GUILayout.EndScrollView();
+            GUILayout.EndArea();
         }
 
         private GUIStyle EditorBox()
@@ -2645,6 +3339,1099 @@ namespace DNAPuzzle
             s.normal.textColor = c;
             return s;
         }
+
+        #region Dokunmatik In-Game Tablet Ekranı (Oyun İçi Masaüstü Arayüzü)
+        private static Texture2D _whiteTex;
+        private static void DrawSolidRect(Rect r, Color c)
+        {
+            if (_whiteTex == null)
+            {
+                _whiteTex = new Texture2D(1, 1);
+                _whiteTex.SetPixel(0, 0, Color.white);
+                _whiteTex.Apply();
+            }
+            Color prev = GUI.color;
+            GUI.color = c;
+            GUI.DrawTexture(r, _whiteTex);
+            GUI.color = prev;
+        }
+
+        private static void DrawBorder(Rect r, Color c, float thickness = 1.5f)
+        {
+            DrawSolidRect(new Rect(r.x, r.y, r.width, thickness), c);
+            DrawSolidRect(new Rect(r.x, r.yMax - thickness, r.width, thickness), c);
+            DrawSolidRect(new Rect(r.x, r.y, thickness, r.height), c);
+            DrawSolidRect(new Rect(r.xMax - thickness, r.y, thickness, r.height), c);
+        }
+
+        private static void DrawRing(Vector2 center, float radius, Color color)
+        {
+            if (_ringTex == null)
+            {
+                int size = 64;
+                _ringTex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+                float rMid = size * 0.38f;
+                float rWidth = size * 0.12f;
+                Color32[] px = new Color32[size * size];
+                Vector2 c = new Vector2(size * 0.5f, size * 0.5f);
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        float d = Vector2.Distance(new Vector2(x, y), c);
+                        float ringDist = Mathf.Abs(d - rMid);
+                        float a = Mathf.Clamp01(1f - (ringDist / rWidth));
+                        a = a * a;
+                        px[y * size + x] = new Color(1f, 1f, 1f, a);
+                    }
+                }
+                _ringTex.SetPixels32(px);
+                _ringTex.Apply();
+            }
+            Color prev = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(center.x - radius, center.y - radius, radius * 2f, radius * 2f), _ringTex);
+            GUI.color = prev;
+        }
+
+        private void DrawTabletHoloOverlays()
+        {
+            // 1. Ekran Açılış Siber Lazer Tarama Çizgisi (Laser Scanline)
+            if (tabletOpenAnim < 1f && !isTabletClosing)
+            {
+                float scanY = tabletOpenAnim * 540f;
+                float scanAlpha = (1f - tabletOpenAnim) * 0.9f;
+                DrawSolidRect(new Rect(0, scanY - 2, 920, 4), new Color(0.4f, 0.95f, 1f, scanAlpha));
+                DrawSolidRect(new Rect(0, scanY - 16, 920, 32), new Color(0.15f, 0.7f, 1f, scanAlpha * 0.35f));
+            }
+
+            // 2. Siber Köşe Çerçeve Braketleri (Sci-Fi Framing Brackets)
+            Color bracketCol = new Color(0.3f, 0.85f, 1f, 0.45f * Mathf.Clamp01(tabletOpenAnim * 1.5f));
+            float bLen = 22f;
+            float bThick = 2f;
+            // Sol Üst
+            DrawSolidRect(new Rect(18, 18, bLen, bThick), bracketCol);
+            DrawSolidRect(new Rect(18, 18, bThick, bLen), bracketCol);
+            // Sağ Üst
+            DrawSolidRect(new Rect(920 - 18 - bLen, 18, bLen, bThick), bracketCol);
+            DrawSolidRect(new Rect(920 - 18 - bThick, 18, bThick, bLen), bracketCol);
+            // Sol Alt
+            DrawSolidRect(new Rect(18, 540 - 18 - bThick, bLen, bThick), bracketCol);
+            DrawSolidRect(new Rect(18, 540 - 18 - bLen, bThick, bLen), bracketCol);
+            // Sağ Alt
+            DrawSolidRect(new Rect(920 - 18 - bLen, 540 - 18 - bThick, bLen, bThick), bracketCol);
+            DrawSolidRect(new Rect(920 - 18 - bThick, 540 - 18 - bLen, bThick, bLen), bracketCol);
+
+            // 3. Parça Yerleştiğinde Yayılan Biyo-Lüminesans Dalga Halkaları (Shockwave Rings)
+            if (lastSnapFeedbackTimer > 0f)
+            {
+                lastSnapFeedbackTimer -= Time.unscaledDeltaTime;
+                float normT = 1f - Mathf.Clamp01(lastSnapFeedbackTimer / 0.45f);
+
+                // 1. Dalga Halkası (Genişleyen Zümrüt Neon)
+                float r1 = Mathf.Lerp(14f, 85f, normT);
+                float a1 = Mathf.Sin(normT * Mathf.PI);
+                DrawRing(lastSnapPos, r1, new Color(0.35f, 1f, 0.7f, a1 * 0.9f));
+
+                // 2. Dalga Halkası (Takip Eden Turkuaz Neon)
+                float t2 = Mathf.Clamp01(normT * 1.35f);
+                float r2 = Mathf.Lerp(10f, 65f, t2);
+                float a2 = Mathf.Sin(t2 * Mathf.PI) * 0.6f;
+                DrawRing(lastSnapPos, r2, new Color(0.3f, 0.85f, 1f, a2));
+
+                // Merkez Parıltı Flaşı
+                float flashAlpha = (1f - normT) * 0.5f;
+                DrawSolidRect(new Rect(lastSnapPos.x - 24, lastSnapPos.y - 30, 48, 60), new Color(0.4f, 1f, 0.85f, flashAlpha));
+            }
+        }
+
+        private string GetShapeIcon(LacunaShape shape)
+        {
+            switch (shape)
+            {
+                case LacunaShape.Circle: return "● Daire (A)";
+                case LacunaShape.Square: return "■ Kare (T)";
+                case LacunaShape.Triangle: return "▲ Üçgen (C)";
+                case LacunaShape.Diamond: return "◆ Elmas (G)";
+                default: return "? Boş";
+            }
+        }
+
+        private string GetShapeShortIcon(LacunaShape shape)
+        {
+            switch (shape)
+            {
+                case LacunaShape.Circle: return "●";
+                case LacunaShape.Square: return "■";
+                case LacunaShape.Triangle: return "▲";
+                case LacunaShape.Diamond: return "◆";
+                default: return "?";
+            }
+        }
+
+        private Color GetShapeColor(LacunaShape shape)
+        {
+            switch (shape)
+            {
+                case LacunaShape.Circle: return new Color(0.0f, 0.85f, 1.0f);   // Cyan
+                case LacunaShape.Square: return new Color(1.0f, 0.55f, 0.1f);   // Orange
+                case LacunaShape.Triangle: return new Color(0.15f, 0.95f, 0.35f); // Green
+                case LacunaShape.Diamond: return new Color(0.9f, 0.25f, 0.95f);  // Magenta
+                default: return new Color(1.0f, 0.3f, 0.3f);    // Red
+            }
+        }
+
+        private GUIStyle CenteredBold(int size)
+        {
+            var s = new GUIStyle(GUI.skin.label);
+            s.fontStyle = FontStyle.Bold;
+            s.fontSize = size;
+            s.alignment = TextAnchor.MiddleCenter;
+            s.wordWrap = true;
+            return s;
+        }
+
+        private string GetShapeTurkishName(LacunaShape shape)
+        {
+            switch (shape)
+            {
+                case LacunaShape.Circle: return "Daire";
+                case LacunaShape.Square: return "Kare";
+                case LacunaShape.Triangle: return "Üçgen";
+                case LacunaShape.Diamond: return "Baklava";
+                default: return "?";
+            }
+        }
+
+        #region Gerçek Girintili & Çıkıntılı Yapboz Doku Üreteci (Procedural Jigsaw Engine)
+        private static Dictionary<string, Texture2D> jigsawTexCache = new Dictionary<string, Texture2D>();
+
+        private static Texture2D GetJigsawPieceTexture(LacunaShape shape, bool isTop, bool isSocket, bool isSelected, bool isHovered)
+        {
+            bool isRound = (shape == LacunaShape.Circle || shape == LacunaShape.Square || shape == LacunaShape.None);
+            string key = $"tile_{shape}_{isTop}_{isSocket}_{isSelected}_{isHovered}";
+            if (jigsawTexCache.TryGetValue(key, out Texture2D cached) && cached != null)
+                return cached;
+
+            int w = 96;
+            int h = 128;
+            Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Bilinear;
+            tex.wrapMode = TextureWrapMode.Clamp;
+
+            Color32[] pixels = new Color32[w * h];
+
+            Color baseCol;
+            switch (shape)
+            {
+                case LacunaShape.Circle: baseCol = new Color(0.12f, 0.52f, 0.98f); break; // Mavi A
+                case LacunaShape.Square: baseCol = new Color(0.95f, 0.25f, 0.25f); break; // Kırmızı T
+                case LacunaShape.Triangle: baseCol = new Color(0.18f, 0.82f, 0.42f); break; // Yeşil C
+                case LacunaShape.Diamond: baseCol = new Color(0.98f, 0.60f, 0.10f); break; // Turuncu G
+                default: baseCol = new Color(0.25f, 0.45f, 0.75f); break;
+            }
+
+            Color32 strokeCol = isSelected ? new Color32(255, 215, 0, 255) : (isHovered ? new Color32(255, 255, 255, 255) : new Color32(10, 20, 42, 255));
+            int strokeWidth = isSelected || isHovered ? 4 : 3;
+
+            // Şekil Sınırları ve Girinti/Çıkıntı Hesaplaması
+            bool[,] insideMap = new bool[w, h];
+            int cx = w / 2;
+
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int bx_min = 14;
+                    int bx_max = w - 14;
+                    int by_min = isTop ? 28 : 10;
+                    int by_max = isTop ? h - 10 : h - 28;
+
+                    bool in_body = (x >= bx_min && x <= bx_max && y >= by_min && y <= by_max);
+
+                    // Sağ Yan Yapboz Dişi (Çıkıntı)
+                    int cy_side = (by_min + by_max) / 2;
+                    bool in_side_tab = (x >= bx_max && (x - bx_max) * (x - bx_max) + (y - cy_side) * (y - cy_side) <= 10 * 10);
+
+                    // Sol Yan Yapboz Oyuğu (Girinti)
+                    bool in_side_indent = (x >= bx_min && (x - bx_min) * (x - bx_min) + (y - cy_side) * (y - cy_side) <= 10 * 10);
+
+                    if (isTop)
+                    {
+                        // ÜST PARÇA: Alt ucu merkez çizgisine sarkar (Male Tab Çıkıntısı)
+                        bool in_center_tab;
+                        if (isRound)
+                        {
+                            // Dairesel Kilit: Yuvarlak kafa + boyun
+                            in_center_tab = ((x - cx) * (x - cx) + (y - 16) * (y - 16) <= 12 * 12) || (Mathf.Abs(x - cx) <= 7 && y >= 16 && y <= 28);
+                        }
+                        else
+                        {
+                            // Açılı Kilit: Üçgen kama
+                            in_center_tab = (y >= 6 && y <= 28 && Mathf.Abs(x - cx) <= (y - 6) * (14.0f / 22.0f));
+                        }
+
+                        insideMap[x, y] = (in_body || in_side_tab || in_center_tab) && !in_side_indent;
+                    }
+                    else
+                    {
+                        // ALT PARÇA: Üst ucunda merkezden oyuk açılır (Female Socket Girintisi)
+                        bool in_center_cutout;
+                        if (isRound)
+                        {
+                            // Dairesel Oyuk
+                            in_center_cutout = ((x - cx) * (x - cx) + (y - (h - 40)) * (y - (h - 40)) <= 12 * 12) || (Mathf.Abs(x - cx) <= 7 && y >= (h - 40) && y <= (h - 28));
+                        }
+                        else
+                        {
+                            // Açılı Oyuk (V şeklinde üçgen yuva)
+                            in_center_cutout = (y >= (h - 50) && y <= (h - 28) && Mathf.Abs(x - cx) <= ((h - 28) - y) * (14.0f / 22.0f));
+                        }
+
+                        insideMap[x, y] = (in_body || in_side_tab) && !in_side_indent && !in_center_cutout;
+                    }
+                }
+            }
+
+            // Piksel Renklendirme & Çerçeve / Gradyan Çizimi
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int idx = y * w + x;
+                    if (!insideMap[x, y])
+                    {
+                        pixels[idx] = new Color32(0, 0, 0, 0);
+                        continue;
+                    }
+
+                    // Kenar Çizgisi Testi
+                    bool isBorder = false;
+                    for (int dy = -strokeWidth; dy <= strokeWidth && !isBorder; dy++)
+                    {
+                        for (int dx = -strokeWidth; dx <= strokeWidth && !isBorder; dx++)
+                        {
+                            if (dx * dx + dy * dy <= strokeWidth * strokeWidth)
+                            {
+                                int nx = x + dx;
+                                int ny = y + dy;
+                                if (nx < 0 || nx >= w || ny < 0 || ny >= h || !insideMap[nx, ny])
+                                {
+                                    isBorder = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (isSocket)
+                    {
+                        // Boş Yuva (Dashed Socket)
+                        if (isBorder)
+                        {
+                            bool dash = ((x + y) / 6) % 2 == 0;
+                            pixels[idx] = dash ? (Color32)(isSelected ? Color.white : new Color(0.7f, 0.85f, 1f, 0.85f)) : new Color32(0, 0, 0, 0);
+                        }
+                        else
+                        {
+                            pixels[idx] = new Color32(24, 52, 105, 85);
+                        }
+                    }
+                    else
+                    {
+                        // Dolu Parça
+                        if (isBorder)
+                        {
+                            pixels[idx] = strokeCol;
+                        }
+                        else
+                        {
+                            // Yumuşak karikatür dikey gradyanı + üst parıltı
+                            float grad = Mathf.Clamp01((float)y / h);
+                            Color c = Color.Lerp(baseCol * 0.82f, baseCol * 1.15f, grad);
+
+                            // Üst kenar parıltısı
+                            if (y >= h - 18 && y <= h - 13 && x >= 24 && x <= w - 24)
+                            {
+                                c = Color.Lerp(c, Color.white, 0.28f);
+                            }
+
+                            pixels[idx] = (Color32)c;
+                        }
+                    }
+                }
+            }
+
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            jigsawTexCache[key] = tex;
+            return tex;
+        }
+
+        #endregion
+
+        private string GetShapeLetter(LacunaShape shape)
+        {
+            switch (shape)
+            {
+                case LacunaShape.Circle: return "A";
+                case LacunaShape.Square: return "T";
+                case LacunaShape.Triangle: return "C";
+                case LacunaShape.Diamond: return "G";
+                default: return "?";
+            }
+        }
+
+        private static string GetSlotTitle(LacunaSlotType slot)
+        {
+            switch (slot)
+            {
+                case LacunaSlotType.Z: return "Boyut Geni (Z)";
+                case LacunaSlotType.V: return "Göz Geni (V)";
+                case LacunaSlotType.K: return "Deri Geni (K)";
+                case LacunaSlotType.P: return "Uzuv Geni (P)";
+                default: return "Genom";
+            }
+        }
+
+        private void StartTransition(int direction, System.Action onMidpoint)
+        {
+            CancelTabletDrag();
+            transitionProgress = 0f;
+            transitionDirection = direction;
+            transitionMidpointAction = onMidpoint;
+            hasFiredTransitionMidpoint = false;
+            audioManager?.PlayClick();
+        }
+
+        private void EnsureJigsawLoaded(int creatureIdx)
+        {
+            CancelTabletDrag();
+            slotCelebrationTimer = 0f;
+            var roster = LacunaGeneticsDatabase.GetCreatures();
+            currentJigsawCreature = Mathf.Clamp(creatureIdx, 0, roster.Count - 1);
+            var creature = roster[currentJigsawCreature];
+            var planet = LacunaGeneticsDatabase.GetPlanetByName(creature.planetName);
+            jigsawStrands = new Dictionary<LacunaSlotType, EditableGeneStrand>();
+            totalRepairs = 0;
+
+            foreach (var slot in tabletSlots)
+            {
+                var gene = LacunaGeneticsDatabase.GetGeneByName(creature.GetInitialGeneName(slot));
+                if (!planet.IsGeneAcceptable(slot, gene.geneName))
+                {
+                    gene = LacunaGeneticsDatabase.GetGenesBySlot(slot).Find(g => planet.IsGeneAcceptable(slot, g.geneName));
+                }
+                var strand = new EditableGeneStrand(gene, creature.gaps);
+                for (int i = 0; i < strand.pairCount; i++)
+                {
+                    // Leave one reference base in each damaged pair.
+                    if (strand.top[i] == LacunaShape.None && strand.bottom[i] == LacunaShape.None)
+                    {
+                        strand.bottom[i] = gene.bottomStrand[i];
+                        strand.wasBottomMissing[i] = false;
+                    }
+                }
+                jigsawStrands.Add(slot, strand);
+                totalRepairs += strand.GetMissingCount();
+            }
+            jigsawMessage = "";
+            jigsawVictoryOpen = false;
+        }
+
+        private bool NextTabletGap(out EditableGeneStrand strand, out int index, out LacunaSlotType activeSlot)
+        {
+            // Eğer bir genom yeni tamamlandıysa ve kutlama süresi işliyorsa, tamamlanan genomu ekranda tut
+            if (slotCelebrationTimer > 0f && jigsawStrands != null && jigsawStrands.ContainsKey(celebratingSlot))
+            {
+                strand = jigsawStrands[celebratingSlot];
+                index = -1; // Boşluk kalmadı, tamamlandı
+                activeSlot = celebratingSlot;
+                return true;
+            }
+
+            if (jigsawStrands != null)
+            {
+                foreach (var slot in tabletSlots)
+                {
+                    if (!jigsawStrands.ContainsKey(slot)) continue;
+                    strand = jigsawStrands[slot];
+                    for (index = 0; index < strand.pairCount; index++)
+                    {
+                        if (strand.top[index] == LacunaShape.None || strand.bottom[index] == LacunaShape.None)
+                        {
+                            activeSlot = slot;
+                            return true;
+                        }
+                    }
+                }
+            }
+            strand = null;
+            index = -1;
+            activeSlot = LacunaSlotType.Z;
+            return false;
+        }
+
+        private void AnswerTabletGap(LacunaShape answer)
+        {
+            if (!NextTabletGap(out var strand, out int index, out var slot)) return;
+            if (index < 0) return;
+
+            bool topMissing = strand.top[index] == LacunaShape.None;
+            LacunaShape partner = topMissing ? strand.bottom[index] : strand.top[index];
+            if (!LacunaGeneticsDatabase.ArePartners(partner, answer))
+            {
+                string correct = GetShapeLetter(LacunaGeneticsDatabase.GetPartner(partner));
+                jigsawMessage = $"Tekrar dene. {GetShapeLetter(partner)} harfinin eşi {correct}.";
+                audioManager?.PlayMismatch();
+                return;
+            }
+
+            // Kilitlenme biyo-lüminesans şok dalgası pozisyonu ve efekti
+            float spacing = Mathf.Min(106, 814f / strand.pairCount);
+            float start = 460 - spacing * (strand.pairCount - 1) * 0.5f;
+            float focusX = start + index * spacing;
+            lastSnapPos = TabletBaseCenter(focusX, topMissing);
+            lastSnapFeedbackTimer = 0.45f;
+            helixSpeedSurge = 1.0f;
+
+            if (topMissing) strand.top[index] = answer;
+            else strand.bottom[index] = answer;
+
+            audioManager?.PlaySnap();
+            audioManager?.PlayResonance();
+
+            // Bu genomun tüm eksikleri kapandı mı?
+            if (!strand.HasAnyMissing())
+            {
+                celebratingSlot = slot;
+                slotCelebrationTimer = 0.75f;
+                helixSpeedSurge = 1.6f;
+                jigsawMessage = $"✨ {GetSlotTitle(slot)} KUSURSUZ ONARILDI! ✨";
+                audioManager?.PlayVictory();
+            }
+            else
+            {
+                jigsawMessage = $"{GetShapeLetter(partner)} ve {GetShapeLetter(answer)} kusursuz eşleşti!";
+            }
+        }
+
+        private void RenderTabletPuzzleScreen(float screenW, float screenH)
+        {
+            if (jigsawStrands == null || jigsawStrands.Count != tabletSlots.Length)
+                EnsureJigsawLoaded(currentJigsawCreature);
+
+            float bgAlpha = Mathf.Clamp01(tabletOpenAnim * 1.3f);
+            var background = new Color(0.034f, 0.078f, 0.13f, 0.96f * bgAlpha);
+            DrawSolidRect(new Rect(0, 0, screenW, screenH), background);
+
+            // Ekran açılış yaylanma (overshoot) eğrisi: 0.88 -> 1.02 -> 1.00
+            float openT = tabletOpenAnim;
+            float springScale = openT < 1f 
+                ? Mathf.Lerp(0.88f, 1f, 1f - Mathf.Pow(1f - openT, 3f)) + Mathf.Sin(openT * Mathf.PI) * 0.035f
+                : 1f;
+
+            float baseScale = Mathf.Min(screenW / 920f, screenH / 540f);
+            float scale = baseScale * springScale;
+
+            Vector2 center = new Vector2(screenW * 0.5f, screenH * 0.5f);
+            var previous = GUI.matrix;
+            Color prevColor = GUI.color;
+
+            GUI.color = new Color(1f, 1f, 1f, bgAlpha);
+            GUI.matrix = previous * Matrix4x4.TRS(
+                new Vector3(center.x - 460f * scale, center.y - 270f * scale, 0),
+                Quaternion.identity,
+                new Vector3(scale, scale, 1f)
+            );
+
+            try 
+            { 
+                DrawTabletBoard(); 
+                DrawTabletHoloOverlays();
+            }
+            finally 
+            { 
+                GUI.matrix = previous; 
+                GUI.color = prevColor;
+            }
+        }
+
+        private void DrawTabletBoard()
+        {
+            var roster = LacunaGeneticsDatabase.GetCreatures();
+            var creature = roster[currentJigsawCreature];
+            var planet = LacunaGeneticsDatabase.GetPlanetByName(creature.planetName);
+            if (jigsawVictoryOpen)
+            {
+                DrawJigsawVictoryModal(920, 540, creature, planet, roster);
+                return;
+            }
+
+            Color panel = new Color(0.07f, 0.14f, 0.21f);
+            Color accent = new Color(0.39f, 0.91f, 0.83f);
+
+            // 1. Sabit Üst Bar (Başlık ve Yan Ok Butonları)
+            GUI.Label(new Rect(32, 12, 340, 43), "DNA onarımı", EditorBold(30));
+            GUI.Label(new Rect(34, 56, 400, 26), "Eşleşme kuralı     A – T     /     C – G", EditorLabel(17));
+
+            bool canSwitch = (transitionProgress >= 1f && slotCelebrationTimer <= 0f);
+
+            if (TabletButton(new Rect(500, 22, 46, 42), "‹", panel, 24))
+            {
+                if (canSwitch)
+                {
+                    int prev = (currentJigsawCreature + roster.Count - 1) % roster.Count;
+                    StartTransition(-1, () => EnsureJigsawLoaded(prev));
+                }
+                return;
+            }
+
+            if (TabletButton(new Rect(717, 22, 46, 42), "›", panel, 24))
+            {
+                if (canSwitch)
+                {
+                    int next = (currentJigsawCreature + 1) % roster.Count;
+                    StartTransition(1, () => EnsureJigsawLoaded(next));
+                }
+                return;
+            }
+
+            if (TabletButton(new Rect(780, 22, 108, 42), "Odaya dön", panel, 15))
+            {
+                StartTabletExit();
+                return;
+            }
+
+            // 2. Kayan Dinamik İçerik Bölgesi (Ok geçişlerinde ve otomatik genom geçişinde akıcı kayar)
+            var prevMat = GUI.matrix;
+            Color prevColor = GUI.color;
+
+            if (transitionProgress < 1f)
+            {
+                float t = transitionProgress < 0.5f 
+                    ? (transitionProgress / 0.5f) 
+                    : ((transitionProgress - 0.5f) / 0.5f);
+                float ease = Mathf.SmoothStep(0f, 1f, t);
+                float xOffset = transitionProgress < 0.5f 
+                    ? (-transitionDirection * ease * 460f) 
+                    : (transitionDirection * (1f - ease) * 460f);
+                float alpha = transitionProgress < 0.5f ? (1f - ease) : ease;
+                float s = Mathf.Lerp(1f, 0.93f, Mathf.Sin(t * Mathf.PI));
+
+                GUI.color = new Color(prevColor.r, prevColor.g, prevColor.b, prevColor.a * alpha);
+                Vector2 pivot = new Vector2(460f, 270f);
+                GUI.matrix = prevMat * Matrix4x4.TRS(
+                    new Vector3(xOffset + pivot.x * (1f - s), pivot.y * (1f - s), 0),
+                    Quaternion.identity,
+                    new Vector3(s, s, 1f)
+                );
+            }
+
+            try
+            {
+                // Canlı ve Gezegen Başlığı (Kayan bölgede, okların arasından yumuşakça geçer)
+                GUI.Label(new Rect(550, 15, 163, 30), creature.creatureName, CenteredBold(18));
+                GUI.Label(new Rect(550, 43, 163, 22), planet.planetName, CenteredBold(12));
+
+                bool hasGap = NextTabletGap(out var strand, out int index, out var slot);
+                int remaining = 0;
+                foreach (var item in jigsawStrands.Values) remaining += item.GetMissingCount();
+                int solved = totalRepairs - remaining;
+
+                // İlerleme çubuğu
+                DrawSolidRect(new Rect(32, 92, 856, 5), panel);
+                DrawSolidRect(new Rect(32, 92, 856f * solved / Mathf.Max(totalRepairs, 1), 5), accent);
+
+                if (!hasGap)
+                {
+                    GUI.Label(new Rect(80, 168, 760, 60), "DNA onarıldı", CenteredBold(36));
+                    GUI.Label(new Rect(80, 238, 760, 38), $"{solved} eşleşme tamamlandı. {creature.creatureName} teste hazır.", CenteredBold(18));
+                    if (TabletButton(new Rect(320, 323, 280, 64), "Kapsülü gönder", new Color(0.07f, 0.40f, 0.38f), 21))
+                        ExecuteJigsawCapsuleAndTest(creature, planet);
+                    GUI.Label(new Rect(40, 423, 840, 42), jigsawMessage, CenteredBold(16));
+                    return;
+                }
+
+                // Genom Başlığı ve Soru Metni
+                bool isCelebrating = (slotCelebrationTimer > 0f);
+                string slotTitle = GetSlotTitle(slot);
+
+                if (isCelebrating)
+                {
+                    GUI.Label(new Rect(34, 112, 600, 32), $"✨ {slotTitle} Kusursuz Onarıldı!", EditorBold(22));
+                }
+                else
+                {
+                    LacunaShape partner = strand.top[index] == LacunaShape.None ? strand.bottom[index] : strand.top[index];
+                    GUI.Label(new Rect(34, 112, 600, 32), $"{slotTitle} — {GetShapeLetter(partner)} hangi harfle eşleşir?", EditorBold(22));
+                }
+
+                GUI.Label(new Rect(680, 115, 208, 28), $"{solved} / {totalRepairs} onarıldı", CenteredBold(15));
+
+                // DNA Heliks Paneli
+                DrawSolidRect(new Rect(32, 160, 856, 186), panel);
+
+                if (isCelebrating)
+                {
+                    // Kutlama anında yeşil/turkuaz bio-enerji parıltısı
+                    float pulse = Mathf.Sin(Time.unscaledTime * 8f) * 0.2f + 0.35f;
+                    DrawSolidRect(new Rect(32, 160, 856, 186), new Color(0.05f, 0.35f, 0.22f, pulse));
+                    DrawBorder(new Rect(32, 160, 856, 186), new Color(0.25f, 1f, 0.65f, 0.75f), 2.5f);
+                }
+
+                float spacing = Mathf.Min(106, 814f / strand.pairCount);
+                float start = 460 - spacing * (strand.pairCount - 1) * 0.5f;
+                bool topGap = (index >= 0) && (strand.top[index] == LacunaShape.None);
+                float focusX = (index >= 0) ? (start + index * spacing) : 460f;
+                Vector2 target = TabletBaseCenter(focusX, topGap);
+
+                float focusAngle = focusX * (2 * Mathf.PI / HelixPeriod) + helixPhase;
+                float focusDepth = topGap ? -Mathf.Sin(focusAngle) : Mathf.Sin(focusAngle);
+                float focusS = Mathf.Lerp(0.90f, 1.04f, (focusDepth + 1f) * 0.5f);
+                float sockW = 54f * focusS;
+                float sockH = 68f * focusS;
+                Rect socket = new Rect(target.x - sockW * 0.5f, target.y - sockH * 0.5f, sockW, sockH);
+
+                // 1. Heliks DNA sarmal şeritleri (Cyan ve İndigo dalgalanan çift sarmal tüpleri)
+                DrawHelixRibbons(start - spacing * 0.60f, spacing * (strand.pairCount + 0.20f));
+
+                // 2. Baz çiftlerini 3B derinlik sırasına göre çiz (Arkadan öne doğru, asla iç içe geçmez!)
+                for (int i = 0; i < strand.pairCount; i++)
+                {
+                    float x = start + i * spacing;
+                    Vector2 top = TabletBaseCenter(x, true);
+                    Vector2 bottom = TabletBaseCenter(x, false);
+
+                    float angle = x * (2 * Mathf.PI / HelixPeriod) + helixPhase;
+                    float depthTop = -Mathf.Sin(angle);
+                    float depthBottom = Mathf.Sin(angle);
+
+                    bool isFocus = (i == index);
+
+                    if (depthTop < depthBottom)
+                    {
+                        DrawTabletBase(top.x, top.y, strand.top[i], strand.bottom[i], true, isFocus, depthTop);
+                        DrawHelixRung(top, bottom);
+                        DrawTabletBase(bottom.x, bottom.y, strand.bottom[i], strand.top[i], false, isFocus, depthBottom);
+                    }
+                    else
+                    {
+                        DrawTabletBase(bottom.x, bottom.y, strand.bottom[i], strand.top[i], false, isFocus, depthBottom);
+                        DrawHelixRung(top, bottom);
+                        DrawTabletBase(top.x, top.y, strand.top[i], strand.bottom[i], true, isFocus, depthTop);
+                    }
+                }
+
+                if (index >= 0 && !isCelebrating)
+                {
+                    DrawBorder(new Rect(socket.x - 3, socket.y - 2, socket.width + 6, socket.height + 4), accent, 2.5f);
+                    LacunaShape partner = strand.top[index] == LacunaShape.None ? strand.bottom[index] : strand.top[index];
+                    DrawTabletTray(socket, partner, topGap);
+                }
+                else if (isCelebrating)
+                {
+                    // Kutlama anında tepsi yerine zafer mesajı
+                    GUI.Label(new Rect(32, 380, 856, 36), $"✔ {slotTitle} TAMAMLANDI — SIRADAKİ DİZİLİME GEÇİLİYOR...", CenteredBold(19));
+                    GUI.Label(new Rect(32, 420, 856, 26), "Otomatik aktarım hazırlanıyor...", CenteredBold(14));
+                }
+            }
+            finally
+            {
+                GUI.matrix = prevMat;
+                GUI.color = prevColor;
+            }
+
+            // 3. Holografik Geçiş Tarama Çizgisi (Ekranı tarayan neon çizgi efekti)
+            if (transitionProgress < 1f)
+            {
+                float scanX = transitionDirection > 0
+                    ? Mathf.Lerp(32f, 888f, transitionProgress)
+                    : Mathf.Lerp(888f, 32f, transitionProgress);
+                float scanAlpha = Mathf.Sin(transitionProgress * Mathf.PI) * 0.85f;
+                DrawSolidRect(new Rect(scanX - 2f, 150f, 4f, 210f), new Color(0.35f, 0.95f, 1f, scanAlpha));
+                DrawSolidRect(new Rect(scanX - 18f, 150f, 36f, 210f), new Color(0.35f, 0.95f, 1f, scanAlpha * 0.20f));
+            }
+        }
+
+        private Vector2 TabletBaseCenter(float x, bool top)
+        {
+            float angle = x * (2 * Mathf.PI / HelixPeriod) + helixPhase;
+            Vector2 offset = new Vector2(37 * Mathf.Sin(angle), -57 * Mathf.Cos(angle));
+            return new Vector2(x, HelixMiddle) + offset * (top ? 0.70f : -0.70f);
+        }
+
+        private static void DrawHelixRung(Vector2 top, Vector2 bottom)
+        {
+            if (Event.current.type != EventType.Repaint) return;
+            Vector2 dir = bottom - top;
+            float dist = dir.magnitude;
+            if (dist < 10f) return;
+
+            // Hidrojen bağı: Parçalar arasındaki temiz bağlantı çizgisi (asla dışarı taşmaz)
+            float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+            var saved = GUI.matrix;
+            GUIUtility.RotateAroundPivot(angle, top);
+            DrawSolidRect(new Rect(top.x, top.y - 1.5f, dist, 3f), new Color(0.35f, 0.85f, 1f, 0.35f));
+            GUI.matrix = saved;
+        }
+
+        private void DrawHelixRibbons(float left, float width)
+        {
+            if (Event.current.type != EventType.Repaint) return;
+            if (helixRibbons == null) helixRibbons = BuildHelixRibbons();
+            float offset = left / HelixPeriod + helixPhase / (2 * Mathf.PI);
+            GUI.DrawTextureWithTexCoords(new Rect(left, HelixMiddle - 72, width, 144), helixRibbons,
+                new Rect(offset, 0, width / HelixPeriod, 1));
+        }
+
+        // Paint one seamless turn. At each crossing the nearer strand covers the farther one.
+        private static Texture2D BuildHelixRibbons()
+        {
+            const int width = 720, height = 288;
+            var pixels = new Color32[width * height];
+            var depths = new float[pixels.Length];
+            for (int i = 0; i < depths.Length; i++) depths[i] = -2;
+            for (int strand = 0; strand < 2; strand++)
+            {
+                Color tint = strand == 0 ? new Color(0.15f, 0.87f, 0.82f) : new Color(0.49f, 0.52f, 1f);
+                for (int step = 0; step < 2 * width; step++)
+                {
+                    float angle = step * Mathf.PI / width;
+                    float side = strand == 0 ? 1 : -1;
+                    float depth = side * Mathf.Sin(angle);
+                    float cx = step * 0.5f + 74 * depth;
+                    float cy = height * 0.5f + 114 * side * Mathf.Cos(angle);
+                    float radius = 7 + 2.5f * depth;
+                    int yMin = Mathf.Max(0, Mathf.FloorToInt(cy - radius));
+                    int yMax = Mathf.Min(height - 1, Mathf.CeilToInt(cy + radius));
+                    int xMin = Mathf.FloorToInt(cx - radius);
+                    int xMax = Mathf.CeilToInt(cx + radius);
+                    for (int y = yMin; y <= yMax; y++)
+                    for (int x = xMin; x <= xMax; x++)
+                    {
+                        float dx = x - cx;
+                        float dy = y - cy;
+                        float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                        if (distance >= radius) continue;
+                        int modX = ((x % width) + width) % width;
+                        int pixel = y * width + modX;
+                        float surface = depth + 0.15f * (1 - distance / radius);
+                        if (surface < depths[pixel]) continue;
+                        depths[pixel] = surface;
+                        Color c = tint * (0.75f + 0.25f * depth);
+                        c = Color.Lerp(c, Color.white, 0.35f * (1 - distance / radius));
+                        c.a = Mathf.Clamp01(radius - distance);
+                        pixels[pixel] = c;
+                    }
+                }
+            }
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            texture.wrapModeU = TextureWrapMode.Repeat;
+            texture.wrapModeV = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            return texture;
+        }
+
+        private void OnDestroy()
+        {
+            if (helixRibbons != null) Destroy(helixRibbons);
+        }
+
+        private static Rect TrayPieceRect(int index)
+        {
+            return new Rect(126 + 190 * index, 392, 96, 118);
+        }
+
+        private void DrawTabletTray(Rect socket, LacunaShape partner, bool top)
+        {
+            Event input = Event.current;
+            int id = GUIUtility.GetControlID("TabletBaseDrag".GetHashCode(), FocusType.Passive);
+            var dropArea = Rect.MinMaxRect(socket.xMin - 11, socket.yMin - 6, socket.xMax + 11, socket.yMax + 6);
+            string instruction = string.IsNullOrEmpty(jigsawMessage)
+                ? "Bir parçayı tut ve soru işaretli yuvaya bırak." : jigsawMessage;
+            GUI.Label(new Rect(32, 352, 856, 32), instruction, CenteredBold(17));
+
+            for (int i = 0; i < tabletBases.Length; i++)
+            {
+                Rect tray = TrayPieceRect(i);
+                bool hover = tray.Contains(input.mousePosition);
+                if (pieceMotion == TabletPieceMotion.Idle && hover && GUIUtility.hotControl == 0
+                    && transitionProgress >= 1f && slotCelebrationTimer <= 0f
+                    && input.type == EventType.MouseDown && input.button == 0)
+                {
+                    dragControl = id;
+                    GUIUtility.hotControl = id;
+                    movingBaseIndex = i;
+                    grabOffset = tray.center - input.mousePosition;
+                    pieceCenter = tray.center;
+                    pieceMotion = TabletPieceMotion.Held;
+                    motionStarted = Time.unscaledTime;
+                    jigsawMessage = "";
+                    audioManager?.PlayClick();
+                    input.Use();
+                }
+
+                bool lifted = pieceMotion != TabletPieceMotion.Idle && movingBaseIndex == i;
+                Rect renderRect = tray;
+                if (hover && !lifted && pieceMotion == TabletPieceMotion.Idle)
+                {
+                    // Tepsi parçasının fareyle üzerine gelindiğinde hafif yükselmesi (hover lift)
+                    renderRect.y -= 4f;
+                    renderRect.height += 4f;
+                }
+                DrawMovingBase(renderRect, tabletBases[i], top, lifted, hover && !lifted, 34);
+            }
+
+            if (pieceMotion == TabletPieceMotion.Idle) return;
+            LacunaShape piece = tabletBases[movingBaseIndex];
+            Rect home = TrayPieceRect(movingBaseIndex);
+
+            if (pieceMotion == TabletPieceMotion.Held)
+            {
+                if (input.type == EventType.Ignore || input.type == EventType.MouseLeaveWindow)
+                {
+                    CancelTabletDrag();
+                    return;
+                }
+
+                // Parça merkezi her zaman farenin tutma ofsetinde birebir sabit kalır (titreme veya kayma olmaz)
+                pieceCenter = input.mousePosition + grabOffset;
+
+                if (input.type == EventType.MouseUp && input.button == 0)
+                {
+                    bool overSocket = dropArea.Contains(input.mousePosition) || dropArea.Contains(pieceCenter);
+                    bool fits = overSocket && LacunaGeneticsDatabase.ArePartners(partner, piece);
+                    releaseCenter = pieceCenter;
+                    motionStarted = Time.unscaledTime;
+                    pieceMotion = fits ? TabletPieceMotion.Snapping : TabletPieceMotion.Returning;
+                    ReleaseTabletPointer();
+                    if (overSocket && !fits) AnswerTabletGap(piece);
+                    else if (!overSocket) jigsawMessage = "Parçayı soru işaretli yuvaya bırakın.";
+                    input.Use();
+                }
+            }
+
+            float elapsed = Time.unscaledTime - motionStarted;
+            Vector2 size = home.size;
+
+            if (pieceMotion == TabletPieceMotion.Held)
+            {
+                size = home.size * 1.05f;
+                bool near = dropArea.Contains(input.mousePosition) || dropArea.Contains(pieceCenter);
+                if (near)
+                {
+                    float pulse = Mathf.Sin(Time.unscaledTime * 9f) * 0.35f + 0.65f;
+                    DrawBorder(dropArea, new Color(0.4f, 1f, 0.8f, pulse), 3f);
+                }
+            }
+            else
+            {
+                float t = Mathf.Clamp01(elapsed / 0.18f);
+                float ease = Mathf.SmoothStep(0, 1, t);
+                Vector2 end = (pieceMotion == TabletPieceMotion.Snapping) ? socket.center : home.center;
+                pieceCenter = Vector2.Lerp(releaseCenter, end, ease);
+                size = Vector2.Lerp(home.size * 1.05f, (pieceMotion == TabletPieceMotion.Snapping) ? socket.size : home.size, ease);
+                if (t >= 1f)
+                {
+                    if (pieceMotion == TabletPieceMotion.Snapping) AnswerTabletGap(piece);
+                    pieceMotion = TabletPieceMotion.Idle;
+                    return;
+                }
+            }
+            // Taşınan parçanın altına yarı saydam yumuşak gölge
+            DrawSolidRect(new Rect(pieceCenter.x - size.x * 0.5f + 4f, pieceCenter.y - size.y * 0.5f + 6f, size.x, size.y), new Color(0f, 0f, 0f, 0.35f));
+            Rect floating = new Rect(pieceCenter - size * 0.5f, size);
+            DrawMovingBase(floating, piece, top, false, true, Mathf.RoundToInt(size.y * 0.31f));
+        }
+
+        private void DrawMovingBase(Rect rect, LacunaShape shape, bool top, bool empty, bool highlight, int fontSize)
+        {
+            var texture = GetJigsawPieceTexture(shape, top, empty, false, highlight);
+            GUI.DrawTexture(rect, texture);
+            if (!empty) GUI.Label(rect, GetShapeLetter(shape), CenteredBold(fontSize));
+        }
+
+        private void ReleaseTabletPointer()
+        {
+            if (dragControl != 0 && GUIUtility.hotControl == dragControl)
+                GUIUtility.hotControl = 0;
+            dragControl = 0;
+        }
+
+        private void CancelTabletDrag()
+        {
+            ReleaseTabletPointer();
+            pieceMotion = TabletPieceMotion.Idle;
+        }
+
+        private void OnApplicationFocus(bool focused)
+        {
+            if (!focused) CancelTabletDrag();
+        }
+
+        private void DrawTabletBase(float cx, float cy, LacunaShape shape, LacunaShape partner, bool top, bool focus, float depth = 0f)
+        {
+            bool missing = shape == LacunaShape.None;
+
+            // 3B derinlik perspektif ölçeği (öndeki parça %104, arkadaki parça %90)
+            float s = Mathf.Lerp(0.90f, 1.04f, (depth + 1f) * 0.5f);
+            float w = 54f * s;
+            float h = 68f * s;
+            var rect = new Rect(cx - w * 0.5f, cy - h * 0.5f, w, h);
+
+            var texture = GetJigsawPieceTexture(missing ? partner : shape, top, missing, focus, false);
+            Color saved = GUI.color;
+
+            if (!focus)
+            {
+                // Arkada kalan parçaları hafifçe gölgele (3B derinlik hissi)
+                float shade = Mathf.Lerp(0.68f, 1f, (depth + 1f) * 0.5f);
+                GUI.color = new Color(0.82f * shade, 0.88f * shade, 0.93f * shade);
+            }
+            else
+            {
+                float shade = Mathf.Lerp(0.88f, 1.05f, (depth + 1f) * 0.5f);
+                GUI.color = new Color(shade, shade, shade);
+            }
+
+            GUI.DrawTexture(rect, texture);
+            GUI.color = saved;
+
+            int fontSize = Mathf.RoundToInt(24f * s);
+            GUI.Label(rect, GetShapeLetter(shape), CenteredBold(fontSize));
+        }
+
+        private bool TabletButton(Rect rect, string label, Color color, int size)
+        {
+            bool hover = rect.Contains(Event.current.mousePosition);
+            if (hover)
+            {
+                color = Color.Lerp(color, Color.white, 0.16f);
+                DrawBorder(rect, new Color(0.35f, 0.95f, 1f, 0.75f), 1.5f);
+            }
+            DrawSolidRect(rect, color);
+            GUI.Label(rect, label, CenteredBold(size));
+            return GUI.Button(rect, GUIContent.none, GUIStyle.none);
+        }
+
+
+        private void ExecuteJigsawCapsuleAndTest(LacunaCreatureRosterEntry entry, LacunaPlanetDefinition planet)
+        {
+            // 1. Tüm slotlarda eksik parça var mı?
+            foreach (LacunaSlotType s in System.Enum.GetValues(typeof(LacunaSlotType)))
+            {
+                var st = jigsawStrands[s];
+                if (st.HasAnyMissing())
+                {
+                    jigsawMessage = $"⚠️ Eksik Parça Var! Slot {s} içinde henüz doldurulmamış ({st.GetMissingCount()} adet '?') yuva var.";
+                    audioManager?.PlayError();
+                    return;
+                }
+            }
+
+            // 2. Tüm slotlarda eşlenik kuralı (● ↔ ■, ▲ ↔ ◆) sağlanmış mı?
+            foreach (LacunaSlotType s in System.Enum.GetValues(typeof(LacunaSlotType)))
+            {
+                var st = jigsawStrands[s];
+                if (!st.AreAllPairsValidComplements())
+                {
+                    jigsawMessage = $"✖ Eşlenik Kuralı İhlali! Slot {s} içinde kurala uymayan eşleşmeler var. (● Daire ⟷ ■ Kare, ▲ Üçgen ⟷ ◆ Elmas).";
+                    audioManager?.PlayError();
+                    return;
+                }
+            }
+
+            // 3. Tüm slotlar geçerli bir gene eşleşiyor mu?
+            var matchedGenes = new Dictionary<LacunaSlotType, LacunaGeneDefinition>();
+            foreach (LacunaSlotType s in System.Enum.GetValues(typeof(LacunaSlotType)))
+            {
+                var st = jigsawStrands[s];
+                var m = LacunaGeneticsDatabase.MatchStrandToGene(s, st.top, st.bottom);
+                if (m == null)
+                {
+                    jigsawMessage = $"❓ Tanımsız Gen! Slot {s} üzerindeki dizilim Kural Kitabındaki 5 geçerli genden hiçbirine uymuyor. Kural kitabına göre ayarlayın.";
+                    audioManager?.PlayError();
+                    return;
+                }
+                matchedGenes[s] = m;
+            }
+
+            // 4. Gezegen uyum kontrolleri (FABAUP, SNIBBLEX, OOMGARTH)
+            foreach (LacunaSlotType s in System.Enum.GetValues(typeof(LacunaSlotType)))
+            {
+                var g = matchedGenes[s];
+                if (!planet.IsGeneAcceptable(s, g.geneName))
+                {
+                    string ruleText = planet.GetRuleForSlot(s);
+                    jigsawMessage = $"⚠️ GEZEGEN UYUMSUZLUĞU: {g.geneName} ({g.bodyTraitTR}) geni {planet.planetName} için uygun değil!\nKural: {ruleText}. Kural Kitabından geçerli gene dönüştürün!";
+                    audioManager?.PlayError();
+                    return;
+                }
+            }
+
+            // TAM BAŞARI! 3D Canlıyı kuluçka odasında hayat buldur!
+            string zG = matchedGenes[LacunaSlotType.Z].geneName;
+            string vG = matchedGenes[LacunaSlotType.V].geneName;
+            string kG = matchedGenes[LacunaSlotType.K].geneName;
+            string pG = matchedGenes[LacunaSlotType.P].geneName;
+
+            SpawnLacunaCreatureInLabChamber(entry.creatureName, planet.planetName, zG, vG, kG, pG);
+            audioManager?.PlayVictory();
+
+            jigsawVictoryOpen = true;
+            jigsawVictoryText =
+                $"Numune #{entry.number}: {entry.creatureName}\n" +
+                $"Gezegen: {planet.planetName} ({planet.subtitleTR})\n\n" +
+                $"Onarılan Genler:\n" +
+                $"  • Boyut (Z): {zG} ({matchedGenes[LacunaSlotType.Z].bodyTraitTR})\n" +
+                $"  • Göz (V): {vG} ({matchedGenes[LacunaSlotType.V].bodyTraitTR})\n" +
+                $"  • Deri (K): {kG} ({matchedGenes[LacunaSlotType.K].bodyTraitTR})\n" +
+                $"  • Uzuv (P): {pG} ({matchedGenes[LacunaSlotType.P].bodyTraitTR})\n\n" +
+                $"Ev Sahibi'nin Notu: \"{entry.landlordClueTR}\"";
+        }
+
+        private void DrawJigsawVictoryModal(float screenW, float screenH, LacunaCreatureRosterEntry entry, LacunaPlanetDefinition planet, List<LacunaCreatureRosterEntry> roster)
+        {
+            DrawSolidRect(new Rect(0, 0, screenW, screenH), new Color(0, 0, 0, 0.75f));
+
+            float modalW = 540f;
+            float modalH = 340f;
+            float modalX = (screenW - modalW) * 0.5f;
+            float modalY = (screenH - modalH) * 0.5f;
+
+            Rect modalRect = new Rect(modalX, modalY, modalW, modalH);
+            DrawSolidRect(modalRect, new Color(0.04f, 0.10f, 0.18f, 0.98f));
+            DrawBorder(modalRect, new Color(0.2f, 1.0f, 0.55f), 3f);
+
+            GUI.color = new Color(0.25f, 1.0f, 0.55f);
+            GUI.Label(new Rect(modalX + 16f, modalY + 16f, modalW - 32f, 28f), "🎉 KAPSÜL MÜHÜRLENDİ & TEST BAŞARILI!", CenteredBold(15));
+            GUI.color = Color.white;
+
+            GUI.Label(new Rect(modalX + 24f, modalY + 54f, modalW - 48f, 180f), jigsawVictoryText, EditorLabel(12));
+
+            float btnY = modalY + modalH - 52f;
+            GUI.backgroundColor = new Color(0.12f, 0.65f, 0.35f);
+            if (GUI.Button(new Rect(modalX + 20f, btnY, 240f, 36f), "➔ SONRAKİ NUMUNEYE GEÇ", EditorBold(11)))
+            {
+                int next = (currentJigsawCreature + 1) % roster.Count;
+                StartTransition(1, () => {
+                    jigsawVictoryOpen = false;
+                    EnsureJigsawLoaded(next);
+                });
+                audioManager?.PlaySnap();
+            }
+
+            GUI.backgroundColor = new Color(0.2f, 0.4f, 0.65f);
+            if (GUI.Button(new Rect(modalX + 280f, btnY, 240f, 36f), "🔬 ODAYA DÖN VE İZLE", EditorBold(11)))
+            {
+                jigsawVictoryOpen = false;
+                ReturnToLabRoom();
+            }
+            GUI.backgroundColor = Color.white;
+        }
+        #endregion
         #endregion
     }
 }

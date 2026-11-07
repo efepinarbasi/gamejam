@@ -374,9 +374,9 @@ namespace DNAPuzzle
             string compactStats = FormatUltraCompactStats(Data);
             FitTextMesh(statsTextMesh, compactStats, maxAllowedWidth: 1.76f, baseCharSize: 0.020f);
 
-            // 2. Sol ve Sağ Puzzle Uçları
-            string leftLetter = Data.leftConnector == NucleotideType.Universal ? "★" : Data.leftConnector.ToString();
-            string rightLetter = Data.rightConnector == NucleotideType.Universal ? "★" : Data.rightConnector.ToString();
+            // 2. Sol ve Sağ Puzzle Uçları (Kılavuz Sembolleri: ●, ■, ▲, ◆)
+            string leftLetter = DNAHelper.GetNucleotideSymbol(Data.leftConnector);
+            string rightLetter = DNAHelper.GetNucleotideSymbol(Data.rightConnector);
             leftNucMesh.text = leftLetter;
             leftNucMesh.color = DNAHelper.GetNucleotideColor(Data.leftConnector);
             rightNucMesh.text = rightLetter;
@@ -386,37 +386,50 @@ namespace DNAPuzzle
             if (rightPlugMat != null) rightPlugMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
             if (rightKeyMat != null) rightKeyMat.color = DNAHelper.GetNucleotideColor(Data.rightConnector);
 
-            // 3. 4 Adet Watson-Crick Nükleotid Basamağını Yapılandır (Şemadaki gibi)
+            // 3. 4 Adet Eşlenik Nükleotid Basamağını Yapılandır (● ↔ ■ ve ▲ ↔ ◆)
             NucleotideType[] topSeq = new NucleotideType[4];
             NucleotideType[] botSeq = new NucleotideType[4];
 
-            // Rung 0: Sol Uç Nükleotidi & Tamamlayıcısı
-            topSeq[0] = Data.leftConnector;
-            botSeq[0] = DNAHelper.GetComplement(Data.leftConnector);
-
-            // Rung 1 & 2: Gen Kategorisine Göre Nükleotid Eşleri
-            NucleotideType inner1 = NucleotideType.A;
-            switch (Data.category)
+            if (Data.isLacunaGene && Data.lacunaTopStrand != null && Data.lacunaTopStrand.Length >= 4)
             {
-                case GeneCategory.Exoskeleton: inner1 = NucleotideType.C; break;
-                case GeneCategory.Metabolic: inner1 = NucleotideType.T; break;
-                case GeneCategory.Cellular: inner1 = NucleotideType.A; break;
-                case GeneCategory.Structural: inner1 = NucleotideType.G; break;
-                case GeneCategory.Cosmic: inner1 = NucleotideType.C; break;
-                case GeneCategory.Mutagen: inner1 = NucleotideType.Universal; break;
+                for (int i = 0; i < 4; i++)
+                {
+                    topSeq[i] = DNAHelper.ShapeToNucleotide(Data.lacunaTopStrand[i]);
+                    botSeq[i] = (Data.lacunaBottomStrand != null && i < Data.lacunaBottomStrand.Length)
+                        ? DNAHelper.ShapeToNucleotide(Data.lacunaBottomStrand[i])
+                        : DNAHelper.GetComplement(topSeq[i]);
+                }
             }
-            topSeq[1] = inner1;
-            botSeq[1] = DNAHelper.GetComplement(inner1);
+            else
+            {
+                // Rung 0: Sol Uç Nükleotidi & Tamamlayıcısı
+                topSeq[0] = Data.leftConnector;
+                botSeq[0] = DNAHelper.GetComplement(Data.leftConnector);
 
-            NucleotideType inner2 = DNAHelper.GetComplement(inner1);
-            topSeq[2] = inner2;
-            botSeq[2] = DNAHelper.GetComplement(inner2);
+                // Rung 1 & 2: Gen Kategorisine Göre Nükleotid Eşleri
+                NucleotideType inner1 = NucleotideType.A;
+                switch (Data.category)
+                {
+                    case GeneCategory.Exoskeleton: inner1 = NucleotideType.C; break;
+                    case GeneCategory.Metabolic: inner1 = NucleotideType.T; break;
+                    case GeneCategory.Cellular: inner1 = NucleotideType.A; break;
+                    case GeneCategory.Structural: inner1 = NucleotideType.G; break;
+                    case GeneCategory.Cosmic: inner1 = NucleotideType.C; break;
+                    case GeneCategory.Mutagen: inner1 = NucleotideType.Universal; break;
+                }
+                topSeq[1] = inner1;
+                botSeq[1] = DNAHelper.GetComplement(inner1);
 
-            // Rung 3: Sağ Uç Nükleotidi & Tamamlayıcısı
-            topSeq[3] = Data.rightConnector;
-            botSeq[3] = DNAHelper.GetComplement(Data.rightConnector);
+                NucleotideType inner2 = DNAHelper.GetComplement(inner1);
+                topSeq[2] = inner2;
+                botSeq[2] = DNAHelper.GetComplement(inner2);
 
-            // Renkleri ve Harfleri Basamaklara Ata
+                // Rung 3: Sağ Uç Nükleotidi & Tamamlayıcısı
+                topSeq[3] = Data.rightConnector;
+                botSeq[3] = DNAHelper.GetComplement(Data.rightConnector);
+            }
+
+            // Renkleri ve Sembolleri (●, ■, ▲, ◆) Basamaklara Ata
             for (int r = 0; r < 4; r++)
             {
                 var bp = basePairs[r];
@@ -429,8 +442,8 @@ namespace DNAPuzzle
                 if (bp.upperMat != null) bp.upperMat.color = cTop;
                 if (bp.lowerMat != null) bp.lowerMat.color = cBot;
 
-                string tStr = topN == NucleotideType.Universal ? "★" : topN.ToString();
-                string bStr = botN == NucleotideType.Universal ? "★" : botN.ToString();
+                string tStr = DNAHelper.GetNucleotideSymbol(topN);
+                string bStr = DNAHelper.GetNucleotideSymbol(botN);
 
                 if (bp.topText != null)
                 {
@@ -453,7 +466,7 @@ namespace DNAPuzzle
                         Color wrongCol = DNAHelper.GetNucleotideColor(Data.currentPlacedNucleotide);
                         if (bp.botText != null)
                         {
-                            bp.botText.text = $"{Data.currentPlacedNucleotide}!";
+                            bp.botText.text = $"{DNAHelper.GetNucleotideSymbol(Data.currentPlacedNucleotide)}!";
                             bp.botText.color = new Color(1f, 0.45f, 0.25f);
                         }
                         if (bp.lowerMat != null)
@@ -585,8 +598,13 @@ namespace DNAPuzzle
 
         private string FormatUltraCompactStats(GeneData data)
         {
-            if (data == null || data.statModifiers == null || data.statModifiers.Count == 0)
-                return $"[{data?.energyCost ?? 0}E]";
+            if (data == null) return "[0E]";
+            if (data.isLacunaGene && !string.IsNullOrEmpty(data.lacunaTraitTR))
+            {
+                return $"SLOT {data.lacunaSlot}  •  {data.lacunaTraitTR}";
+            }
+            if (data.statModifiers == null || data.statModifiers.Count == 0)
+                return $"[{data.energyCost}E]";
 
             var parts = new List<string>();
             foreach (var mod in data.statModifiers)
@@ -837,6 +855,14 @@ namespace DNAPuzzle
             Data.isBroken = true;
             Data.isRepaired = false;
             Data.hasPlacedNucleotide = false;
+            if (Data.isLacunaGene && Data.lacunaTopStrand != null && Data.brokenRungIndex >= 0 && Data.brokenRungIndex < Data.lacunaTopStrand.Length)
+            {
+                Data.lacunaTopStrand[Data.brokenRungIndex] = LacunaShape.None;
+                if (Data.lacunaBottomStrand != null && Data.brokenRungIndex < Data.lacunaBottomStrand.Length)
+                {
+                    Data.lacunaBottomStrand[Data.brokenRungIndex] = LacunaShape.None;
+                }
+            }
             UpdateVisuals();
             TriggerTouchPulse();
         }
@@ -847,6 +873,14 @@ namespace DNAPuzzle
             Data.isBroken = true;
             Data.isRepaired = false;
             Data.hasPlacedNucleotide = false;
+            if (Data.isLacunaGene && Data.lacunaTopStrand != null && Data.brokenRungIndex >= 0 && Data.brokenRungIndex < Data.lacunaTopStrand.Length)
+            {
+                Data.lacunaTopStrand[Data.brokenRungIndex] = LacunaShape.None;
+                if (Data.lacunaBottomStrand != null && Data.brokenRungIndex < Data.lacunaBottomStrand.Length)
+                {
+                    Data.lacunaBottomStrand[Data.brokenRungIndex] = LacunaShape.None;
+                }
+            }
             UpdateVisuals();
             TriggerTouchPulse();
         }
@@ -868,6 +902,19 @@ namespace DNAPuzzle
                 Data.isRepaired = true;
                 Data.isBroken = false;
                 Data.isDeformed = false;
+
+                if (Data.isLacunaGene && Data.lacunaTopStrand != null && Data.brokenRungIndex >= 0 && Data.brokenRungIndex < Data.lacunaTopStrand.Length)
+                {
+                    LacunaShape repShape = DNAHelper.NucleotideToShape(nuc);
+                    Data.lacunaTopStrand[Data.brokenRungIndex] = repShape;
+                    if (Data.lacunaBottomStrand != null && Data.brokenRungIndex < Data.lacunaBottomStrand.Length)
+                    {
+                        Data.lacunaBottomStrand[Data.brokenRungIndex] = LacunaGeneticsDatabase.GetPartner(repShape);
+                    }
+                    if (Data.brokenRungIndex == 0) Data.leftConnector = nuc;
+                    if (Data.brokenRungIndex == Data.lacunaTopStrand.Length - 1) Data.rightConnector = DNAHelper.ShapeToNucleotide(LacunaGeneticsDatabase.GetPartner(repShape));
+                }
+
                 UpdateVisuals();
                 if (gameObject.activeInHierarchy)
                 {
@@ -893,6 +940,63 @@ namespace DNAPuzzle
             UpdateVisuals();
             TriggerGlitchShake();
             return false;
+        }
+
+        public void TransformToLacunaGene(LacunaGeneDefinition targetDef)
+        {
+            if (Data == null || targetDef == null) return;
+            Data.ApplyLacunaGeneDefinition(targetDef, keepBrokenState: false);
+            Data.isBroken = false;
+            Data.isRepaired = true;
+            Data.isDeformed = false;
+            UpdateVisuals();
+            if (gameObject.activeInHierarchy)
+            {
+                StopCoroutine("RepairSuccessRoutine");
+                StartCoroutine(RepairSuccessRoutine());
+            }
+        }
+
+        public string MutateRungWithNucleotide(int pairIndex, NucleotideType newTopNuc)
+        {
+            if (Data == null || !Data.isLacunaGene || Data.lacunaTopStrand == null) return null;
+            int idx = Mathf.Clamp(pairIndex, 0, Data.lacunaTopStrand.Length - 1);
+            LacunaShape newTopShape = DNAHelper.NucleotideToShape(newTopNuc);
+            LacunaShape newBotShape = LacunaGeneticsDatabase.GetPartner(newTopShape);
+            Data.lacunaTopStrand[idx] = newTopShape;
+            if (Data.lacunaBottomStrand != null && idx < Data.lacunaBottomStrand.Length)
+            {
+                Data.lacunaBottomStrand[idx] = newBotShape;
+            }
+            if (idx == 0) Data.leftConnector = newTopNuc;
+            if (idx == Data.lacunaTopStrand.Length - 1) Data.rightConnector = DNAHelper.ShapeToNucleotide(newBotShape);
+
+            // Bu slottaki genlerden dizilimi eşleşen var mı kontrol et
+            var slotGenes = LacunaGeneticsDatabase.GetGenesBySlot(Data.lacunaSlot);
+            foreach (var gDef in slotGenes)
+            {
+                if (gDef.topStrand.Length == Data.lacunaTopStrand.Length)
+                {
+                    bool exact = true;
+                    for (int k = 0; k < gDef.topStrand.Length; k++)
+                    {
+                        if (gDef.topStrand[k] != Data.lacunaTopStrand[k])
+                        {
+                            exact = false;
+                            break;
+                        }
+                    }
+                    if (exact)
+                    {
+                        TransformToLacunaGene(gDef);
+                        return gDef.geneName;
+                    }
+                }
+            }
+
+            UpdateVisuals();
+            TriggerTouchPulse();
+            return null;
         }
 
         private IEnumerator RepairSuccessRoutine()

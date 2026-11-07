@@ -380,6 +380,8 @@ namespace DNAPuzzle
 
             // Kriter 1: En az bir gen yerleştirilmiş olmalı
             bool hasAnyGene = false;
+            bool isLacunaStrand = false;
+            int equippedCount = 0;
             if (strandGenes != null)
             {
                 for (int i = 0; i < strandGenes.Length; i++)
@@ -387,7 +389,8 @@ namespace DNAPuzzle
                     if (strandGenes[i] != null)
                     {
                         hasAnyGene = true;
-                        break;
+                        equippedCount++;
+                        if (strandGenes[i].isLacunaGene) isLacunaStrand = true;
                     }
                 }
             }
@@ -396,6 +399,59 @@ namespace DNAPuzzle
             {
                 result.isSuccess = false;
                 result.failedReasons.Add("DNA sarmalında hiçbir gen bulunmuyor!");
+            }
+
+            if (isLacunaStrand && currentPlanet != null)
+            {
+                string pId = currentPlanet.planetId.ToLowerInvariant();
+                string targetP = pId.Contains("snibblex") || pId.Contains("cryo") ? "SNIBBLEX" :
+                                 (pId.Contains("oomgarth") || pId.Contains("toxis") ? "OOMGARTH" : "FABAUP");
+                var pDef = LacunaGeneticsDatabase.GetPlanet(targetP);
+
+                if (equippedCount < 4)
+                {
+                    result.isSuccess = false;
+                    result.failedReasons.Add($"Ana DNA sarmalına 4 genomun tamamı yerleştirilmelidir! ({equippedCount}/4 Takılı)");
+                }
+
+                if (pDef != null && strandGenes != null)
+                {
+                    for (int i = 0; i < strandGenes.Length; i++)
+                    {
+                        var g = strandGenes[i];
+                        if (g == null) continue;
+                        if (g.isBroken && !g.isRepaired)
+                        {
+                            result.isSuccess = false;
+                            result.failedReasons.Add($"{g.geneName} (Slot {g.lacunaSlot}) henüz onarılmadı!");
+                        }
+                        else if (!pDef.IsGeneAcceptable(g.lacunaSlot, g.geneName))
+                        {
+                            result.isSuccess = false;
+                            result.failedReasons.Add($"Slot {g.lacunaSlot} ({g.geneName}) {pDef.planetName} gezegen kuralına uymuyor!");
+                        }
+                    }
+                }
+
+                if (result.isSuccess && !hasDeformed)
+                {
+                    result.starRating = 3;
+                    result.statusTitle = $"⭐⭐⭐ {targetP} ADAPTASYONU KUSURSUZ";
+                    result.detailedMessage = $"Tebrikler! 4 genom ({strandGenes[0]?.geneName}, {strandGenes[1]?.geneName}, {strandGenes[2]?.geneName}, {strandGenes[3]?.geneName}) {targetP} gezegen kurallarına tam uyum sağladı!";
+                    int pIdx = targetP == "SNIBBLEX" ? 1 : (targetP == "OOMGARTH" ? 2 : 0);
+                    ProgressionManager.SaveStars(pIdx, 3);
+                }
+                else if (!hasDeformed)
+                {
+                    result.starRating = 0;
+                    result.statusTitle = $"❌ {targetP} ADAPTASYONU BAŞARISIZ";
+                    result.detailedMessage = result.failedReasons.Count > 0
+                        ? result.failedReasons[0]
+                        : "Sarmaldaki genomlar gezegenin kabul kurallarına uymuyor.";
+                }
+
+                OnEvaluationCompleted?.Invoke(result);
+                return result;
             }
 
             // Kriter 2: Enerji Bütçesi

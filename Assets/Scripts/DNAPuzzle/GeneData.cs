@@ -48,6 +48,47 @@ namespace DNAPuzzle
         public bool isDeformed = false;
         public string deformedPhenotypeTitle = "Kaotik Bozulma";
 
+        [Header("Lacuna Genetics GDD Verileri")]
+        public bool isLacunaGene = false;
+        public LacunaSlotType lacunaSlot = LacunaSlotType.Z;
+        public LacunaShape[] lacunaTopStrand;
+        public LacunaShape[] lacunaBottomStrand;
+        public string lacunaTraitTR = "";
+        public int selectedEditRungIndex = -1;
+
+        public void ApplyLacunaGeneDefinition(LacunaGeneDefinition def, bool keepBrokenState = false)
+        {
+            if (def == null) return;
+            isLacunaGene = true;
+            lacunaSlot = def.slot;
+            geneName = def.geneName;
+            geneId = "gene_" + def.geneName.ToLowerInvariant();
+            lacunaTraitTR = def.bodyTraitTR;
+
+            lacunaTopStrand = new LacunaShape[def.pairCount];
+            lacunaBottomStrand = new LacunaShape[def.pairCount];
+            for (int i = 0; i < def.pairCount; i++)
+            {
+                lacunaTopStrand[i] = def.topStrand[i];
+                lacunaBottomStrand[i] = def.bottomStrand[i];
+            }
+
+            if (def.pairCount > 0)
+            {
+                leftConnector = DNAHelper.ShapeToNucleotide(def.topStrand[0]);
+                rightConnector = DNAHelper.ShapeToNucleotide(def.topStrand[def.pairCount - 1]);
+            }
+
+            description = $"Slot {def.slot} ({def.pairCount} Çift) • Özellik: {def.bodyTraitTR}";
+
+            if (!keepBrokenState)
+            {
+                isBroken = false;
+                isRepaired = true;
+                hasPlacedNucleotide = false;
+            }
+        }
+
         public void ResetRepairAttempts()
         {
             remainingRepairAttempts = maxRepairAttempts;
@@ -76,8 +117,29 @@ namespace DNAPuzzle
             return total;
         }
 
+        public string GetLacunaTopSequenceString()
+        {
+            if (lacunaTopStrand == null || lacunaTopStrand.Length == 0) return "";
+            var parts = new string[lacunaTopStrand.Length];
+            for (int i = 0; i < lacunaTopStrand.Length; i++) parts[i] = LacunaGeneticsDatabase.GetSymbol(lacunaTopStrand[i]);
+            return string.Join(" ", parts);
+        }
+
+        public string GetLacunaBottomSequenceString()
+        {
+            if (lacunaBottomStrand == null || lacunaBottomStrand.Length == 0) return "";
+            var parts = new string[lacunaBottomStrand.Length];
+            for (int i = 0; i < lacunaBottomStrand.Length; i++) parts[i] = LacunaGeneticsDatabase.GetSymbol(lacunaBottomStrand[i]);
+            return string.Join(" ", parts);
+        }
+
         public string GetStatsSummary()
         {
+            if (isLacunaGene && lacunaTopStrand != null)
+            {
+                return $"SLOT {lacunaSlot} ({lacunaTopStrand.Length} Çift) • {lacunaTraitTR}";
+            }
+
             if (statModifiers == null || statModifiers.Count == 0)
                 return "Özellik yok";
 

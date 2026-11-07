@@ -143,9 +143,16 @@ public class CameraStationController : MonoBehaviour
         while (time < duration)
         {
             time += Time.deltaTime;
-            float k = ease.Evaluate(Mathf.Clamp01(time / duration));
-            t.position = Vector3.LerpUnclamped(fromPos, toPos, k);
-            t.rotation = Quaternion.SlerpUnclamped(fromRot, toRot, k);
+            float rawT = Mathf.Clamp01(time / duration);
+            // Sinematik pürüzsüz quintic eğri (smootherstep: 6t^5 - 15t^4 + 10t^3)
+            float smoothT = rawT * rawT * rawT * (rawT * (rawT * 6f - 15f) + 10f);
+            float k = (ease != null && ease.length > 1) ? ease.Evaluate(rawT) : smoothT;
+
+            // Masaya yaklaşırken doğal kamera kavisi ve hafif odaklanma baş eğimi
+            float arc = Mathf.Sin(rawT * Mathf.PI) * 0.09f;
+            Quaternion tilt = Quaternion.Euler(Mathf.Sin(rawT * Mathf.PI) * 1.4f, 0f, 0f);
+            t.position = Vector3.LerpUnclamped(fromPos, toPos, k) + Vector3.up * arc;
+            t.rotation = Quaternion.SlerpUnclamped(fromRot, toRot, k) * tilt;
             cam.fieldOfView = Mathf.LerpUnclamped(fromFov, toFov, k);
             yield return null;
         }

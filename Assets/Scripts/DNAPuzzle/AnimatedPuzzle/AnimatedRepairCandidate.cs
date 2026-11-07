@@ -78,13 +78,14 @@ namespace DNAPuzzle
             ringMat.color = nucColor * 0.9f;
             ring.GetComponent<MeshRenderer>().material = ringMat;
 
-            // 3. Kristallin Nükleotid Çekirdeği (Glowing Core)
-            GameObject core = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            // 3. Kristallin Nükleotid Çekirdeği (Şekle Özel 3D Core: ● Sphere, ■ Cube, ▲/◆ Kristal)
+            PrimitiveType corePrim = (Nucleotide == NucleotideType.A) ? PrimitiveType.Sphere : PrimitiveType.Cube;
+            GameObject core = GameObject.CreatePrimitive(corePrim);
             core.name = "NucCore";
             core.transform.SetParent(transform, false);
             core.transform.localPosition = new Vector3(0f, 0.10f, 0f);
-            core.transform.localScale = new Vector3(0.72f, 0.72f, 0.72f);
-            core.transform.localRotation = Quaternion.Euler(45f, 45f, 0f);
+            core.transform.localScale = (Nucleotide == NucleotideType.A) ? new Vector3(0.82f, 0.82f, 0.82f) : new Vector3(0.72f, 0.72f, 0.72f);
+            core.transform.localRotation = (Nucleotide == NucleotideType.T) ? Quaternion.identity : Quaternion.Euler(45f, 45f, 0f);
             Destroy(core.GetComponent<Collider>());
             coreMat = new Material(litShader);
             coreMat.color = nucColor;
@@ -105,12 +106,12 @@ namespace DNAPuzzle
             glowLight.intensity = 1.2f;
             glowLight.color = nucColor;
 
-            // 5. Nükleotid Harfi (A, T, C, G) (Kristal Netlikte Anti-Aliased Yazı Tipi)
+            // 5. Nükleotid Şekli (●, ■, ▲, ◆)
             GameObject symText = new GameObject("SymbolText");
             symText.transform.SetParent(transform, false);
-            symText.transform.localPosition = new Vector3(0f, 0.12f, -0.45f);
+            symText.transform.localPosition = new Vector3(0f, 0.12f, -0.48f);
             symbolTextMesh = symText.AddComponent<TextMesh>();
-            symbolTextMesh.text = Nucleotide.ToString();
+            symbolTextMesh.text = DNAHelper.GetNucleotideSymbol(Nucleotide);
             symbolTextMesh.characterSize = 0.036f;
             symbolTextMesh.fontSize = 110;
             symbolTextMesh.alignment = TextAlignment.Center;
@@ -118,7 +119,7 @@ namespace DNAPuzzle
             symbolTextMesh.color = Color.white;
             symbolTextMesh.fontStyle = FontStyle.Bold;
 
-            // 6. İsim Etiketi (Adenin, Timin vb.)
+            // 6. İsim Etiketi (Daire ●, Kare ■, Üçgen ▲, Elmas ◆)
             GameObject lblText = new GameObject("LabelText");
             lblText.transform.SetParent(transform, false);
             lblText.transform.localPosition = new Vector3(0f, -0.48f, -0.1f);
@@ -131,17 +132,17 @@ namespace DNAPuzzle
             labelTextMesh.color = new Color(0.85f, 0.92f, 1f);
             labelTextMesh.fontStyle = FontStyle.Bold;
 
-            // 7. Eşleşme İpucu (A ↔ T, C ↔ G)
+            // 7. Eşleşme İpucu (● ↔ ■, ▲ ↔ ◆)
             GameObject hintText = new GameObject("HintText");
             hintText.transform.SetParent(transform, false);
             hintText.transform.localPosition = new Vector3(0f, -0.66f, -0.1f);
             pairHintTextMesh = hintText.AddComponent<TextMesh>();
-            pairHintTextMesh.text = $"↔ {DNAHelper.GetComplement(Nucleotide)} Eşi";
-            pairHintTextMesh.characterSize = 0.016f;
-            pairHintTextMesh.fontSize = 72;
+            pairHintTextMesh.text = $"↔ {DNAHelper.GetNucleotideSymbol(DNAHelper.GetComplement(Nucleotide))} Eşi";
+            pairHintTextMesh.characterSize = 0.018f;
+            pairHintTextMesh.fontSize = 76;
             pairHintTextMesh.alignment = TextAlignment.Center;
             pairHintTextMesh.anchor = TextAnchor.MiddleCenter;
-            pairHintTextMesh.color = new Color(0.6f, 0.75f, 0.9f, 0.85f);
+            pairHintTextMesh.color = new Color(0.6f, 0.85f, 1f, 0.95f);
 
             // 8. Tıklama Collider'ı
             var col = gameObject.AddComponent<BoxCollider>();
@@ -151,14 +152,7 @@ namespace DNAPuzzle
 
         private string GetNucFullName(NucleotideType nuc)
         {
-            switch (nuc)
-            {
-                case NucleotideType.A: return "Adenin (A)";
-                case NucleotideType.T: return "Timin (T)";
-                case NucleotideType.C: return "Sitozin (C)";
-                case NucleotideType.G: return "Guanin (G)";
-                default: return nuc.ToString();
-            }
+            return DNAHelper.GetNucleotideFullName(nuc);
         }
 
         public void SetBasePosition(Vector3 newPos, Vector3 newScale)

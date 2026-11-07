@@ -178,15 +178,15 @@ namespace DNAPuzzle
             {
                 case 1:
                     themeCol = new Color(0.2f, 0.85f, 1f);
-                    envInfo = "🧪 HEDEF ORTAM: ❄️ CRYO-KORE (Buzul Dünyası)  |  -85°C  |  0.8 ATM  |  KİYO-STABİLİTE AKTİF";
+                    envInfo = "🧪 HEDEF GEZEGEN: ❄️ SNIBBLEX (Donmuş & Karanlık)  |  DERİ: KOSH/KIMBO  |  BOY: ≥ZEMBO  |  GÖZ: ≥VARQ  |  UZUV: ≤PUNKO";
                     break;
                 case 2:
                     themeCol = new Color(0.25f, 1f, 0.5f);
-                    envInfo = "🧪 HEDEF ORTAM: ☣️ TOXIS-PRIME (Asit Dünyası)  |  TOKSİK  |  5.4 ATM  |  BİYO-KORUMA AKTİF";
+                    envInfo = "🧪 HEDEF GEZEGEN: ☣️ OOMGARTH (Ağır Çekim Bataklığı)  |  DERİ: KIMBO/KUPPA  |  BOY: ≤ZEMBO  |  GÖZ: ≥VESHI  |  UZUV: ≥PONDO";
                     break;
                 default:
                     themeCol = new Color(1f, 0.45f, 0.12f);
-                    envInfo = "🧪 HEDEF ORTAM: 🔥 PYROS-9 (Magma Dünyası)  |  480°C  |  3.2 ATM  |  TERMAL STABİLİTE AKTİF";
+                    envInfo = "🧪 HEDEF GEZEGEN: 🔥 FABAUP (Kavrulmuş Kumullar)  |  DERİ: KRELL/KLOOT  |  BOY: ≥ZORP  |  GÖZ: ≤VESHI  |  UZUV: ≥PLORT";
                     break;
             }
 

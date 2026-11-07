@@ -121,18 +121,73 @@ namespace DNAPuzzle
         {
             switch (type)
             {
-                case NucleotideType.A:
-                    return new Color(0.96f, 0.25f, 0.37f); // Neon Gül Kırmızısı
-                case NucleotideType.T:
-                    return new Color(0.96f, 0.62f, 0.05f); // Canlı Kehribar Sarısı
-                case NucleotideType.C:
-                    return new Color(0.02f, 0.71f, 0.83f); // Elektrik Camgöbeği
-                case NucleotideType.G:
-                    return new Color(0.66f, 0.33f, 0.97f); // Neon Mor
+                case NucleotideType.A: // ● (Daire / Circle)
+                    return new Color(0.15f, 0.85f, 1.0f); // Parlak Camgöbeği
+                case NucleotideType.T: // ■ (Kare / Square - ● ile eşleşir)
+                    return new Color(0.98f, 0.32f, 0.45f); // Mercan Kırmızısı
+                case NucleotideType.C: // ▲ (Üçgen / Triangle)
+                    return new Color(0.20f, 0.95f, 0.55f); // Zümrüt Yeşili
+                case NucleotideType.G: // ◆ (Elmas / Diamond - ▲ ile eşleşir)
+                    return new Color(1.0f, 0.78f, 0.15f); // Kehribar Altın
                 case NucleotideType.Universal:
                     return new Color(0.06f, 0.90f, 0.50f); // Neon Zümrüt
                 default:
                     return Color.white;
+            }
+        }
+
+        /// <summary>
+        /// Lacuna Genetics GDD şekil sembolünü döner:
+        /// A -> ● (Daire), T -> ■ (Kare), C -> ▲ (Üçgen), G -> ◆ (Elmas)
+        /// Eşlenik Kuralı: ● ↔ ■  ve  ▲ ↔ ◆
+        /// </summary>
+        public static string GetNucleotideSymbol(NucleotideType type)
+        {
+            switch (type)
+            {
+                case NucleotideType.A: return "●";
+                case NucleotideType.T: return "■";
+                case NucleotideType.C: return "▲";
+                case NucleotideType.G: return "◆";
+                case NucleotideType.Universal: return "★";
+                default: return "●";
+            }
+        }
+
+        public static string GetNucleotideFullName(NucleotideType type)
+        {
+            switch (type)
+            {
+                case NucleotideType.A: return "Daire (●)";
+                case NucleotideType.T: return "Kare (■)";
+                case NucleotideType.C: return "Üçgen (▲)";
+                case NucleotideType.G: return "Elmas (◆)";
+                case NucleotideType.Universal: return "Joker (★)";
+                default: return type.ToString();
+            }
+        }
+
+        public static NucleotideType ShapeToNucleotide(LacunaShape shape)
+        {
+            switch (shape)
+            {
+                case LacunaShape.Circle: return NucleotideType.A;   // ●
+                case LacunaShape.Square: return NucleotideType.T;   // ■
+                case LacunaShape.Triangle: return NucleotideType.C; // ▲
+                case LacunaShape.Diamond: return NucleotideType.G;  // ◆
+                default: return NucleotideType.A;
+            }
+        }
+
+        public static LacunaShape NucleotideToShape(NucleotideType nuc)
+        {
+            switch (nuc)
+            {
+                case NucleotideType.A: return LacunaShape.Circle;   // ●
+                case NucleotideType.T: return LacunaShape.Square;   // ■
+                case NucleotideType.C: return LacunaShape.Triangle; // ▲
+                case NucleotideType.G: return LacunaShape.Diamond;  // ◆
+                default: return LacunaShape.Circle;
             }
         }
 

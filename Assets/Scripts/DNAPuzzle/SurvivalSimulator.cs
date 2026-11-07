@@ -52,6 +52,61 @@ namespace DNAPuzzle
             var evaluation = manager.EvaluateCreatureSurvival();
             var stats = manager.CalculateTotalStats();
 
+            bool isLacuna = false;
+            if (manager.StrandGenes != null)
+            {
+                for (int i = 0; i < manager.StrandGenes.Length; i++)
+                {
+                    if (manager.StrandGenes[i] != null && manager.StrandGenes[i].isLacunaGene)
+                    {
+                        isLacuna = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isLacuna)
+            {
+                OnPhaseUpdate?.Invoke(
+                    SimulationPhase.AtmosphericEntry,
+                    $"🔥 FAZ 1: {planet.planetName} atmosferine giriş ve Deri (Slot K) kontrolü...",
+                    true
+                );
+                yield return new WaitForSeconds(stepDuration * 0.75f);
+
+                OnPhaseUpdate?.Invoke(
+                    SimulationPhase.GravityPressure,
+                    $"🌍 FAZ 2: Yerçekimi & Boy (Slot Z) + Uzuv (Slot P) adaptasyon testi...",
+                    true
+                );
+                yield return new WaitForSeconds(stepDuration * 0.75f);
+
+                OnPhaseUpdate?.Invoke(
+                    SimulationPhase.ChemicalAtmosphere,
+                    $"👁️ FAZ 3: Görüş (Slot V) ve ●↔■ / ▲↔◆ baz eşlenik kararlılığı taranıyor...",
+                    true
+                );
+                yield return new WaitForSeconds(stepDuration * 0.75f);
+
+                if (!evaluation.isSuccess)
+                {
+                    string failReason = evaluation.failedReasons.Count > 0 ? evaluation.failedReasons[0] : "Genom gezegen kurallarına uymadı!";
+                    OnPhaseUpdate?.Invoke(SimulationPhase.Completed, $"❌ KRİTİK: {failReason}", false);
+                    yield return new WaitForSeconds(stepDuration);
+                    FinishSimulation(evaluation);
+                    yield break;
+                }
+
+                OnPhaseUpdate?.Invoke(
+                    SimulationPhase.Completed,
+                    $"✨ CANLI {planet.planetName.ToUpper()} GEZEGENİNDE HAYATTA KALDI!",
+                    true
+                );
+                yield return new WaitForSeconds(stepDuration);
+                FinishSimulation(evaluation);
+                yield break;
+            }
+
             // FAZ 1: Atmosfere Giriş (Termal & Soğuk)
             OnPhaseUpdate?.Invoke(
                 SimulationPhase.AtmosphericEntry, 
