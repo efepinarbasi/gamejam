@@ -77,6 +77,16 @@ namespace Lacuna
         [SerializeField] private Vector3 placeholderScale = new Vector3(0.25f, 0.25f, 0.25f);
         [SerializeField] private float deathShrinkTime = 0.7f;
 
+        [Header("Sound effects")]
+        [Tooltip("Plays when the capsule starts its launch (when it begins to shake, before it lifts off).")]
+        [SerializeField] private AudioClip rocketLaunchSound;
+        [SerializeField, Range(0f, 1f)] private float rocketLaunchVolume = 1f;
+        [Tooltip("Plays every time the door opens or closes.")]
+        [SerializeField] private AudioClip doorSlideSound;
+        [SerializeField, Range(0f, 1f)] private float doorSlideVolume = 1f;
+        [Tooltip("0 = plain stereo, 1 = fully 3D (louder when the camera is near the door or capsule).")]
+        [SerializeField, Range(0f, 1f)] private float sfxSpatialBlend = 0.5f;
+
         [Header("Hooks for sound and VFX")]
         public UnityEvent onDoorOpening = new UnityEvent();
         public UnityEvent onDoorClosing = new UnityEvent();
@@ -97,6 +107,7 @@ namespace Lacuna
         private Vector3 creatureJitter;
         private bool creatureRidesCapsule;
         private Vector3 creatureRideOffset;
+        private AudioSource sfxSource;
 
         private Vector3 capsulePivotOffset; // capsule pivot minus the center of its body
         private Vector3 capsuleSize;        // size of the capsule's body after fitting
@@ -113,6 +124,13 @@ namespace Lacuna
                 platform.SetParent(transform, false);
             }
             platform.position = SpawnPos;
+
+            // A child object carries the sound effects, so it can be moved to the door or capsule.
+            GameObject sfx = new GameObject("SfxSource");
+            sfx.transform.SetParent(transform, false);
+            sfxSource = sfx.AddComponent<AudioSource>();
+            sfxSource.playOnAwake = false;
+            sfxSource.loop = false;
 
             if (door != null)
             {
@@ -307,6 +325,7 @@ namespace Lacuna
         private IEnumerator LaunchCapsule()
         {
             onCapsuleLaunched.Invoke();
+            PlaySfx(rocketLaunchSound, rocketLaunchVolume, CurrentCapsule.transform.position);
 
             Transform cap = CurrentCapsule.transform;
             Vector3 basePos = cap.position;
@@ -435,6 +454,15 @@ namespace Lacuna
             yield return WaitForDoor();
         }
 
+        private void PlaySfx(AudioClip clip, float volume, Vector3 position)
+        {
+            if (clip == null || sfxSource == null) return;
+
+            sfxSource.transform.position = position;
+            sfxSource.spatialBlend = sfxSpatialBlend;
+            sfxSource.PlayOneShot(clip, volume);
+        }
+
         // ------------------------------------------------------------ door
 
         private IEnumerator OpenDoor()
@@ -468,6 +496,8 @@ namespace Lacuna
                 doorBusy = false;
                 yield break;
             }
+
+            PlaySfx(doorSlideSound, doorSlideVolume, door.position);
 
             Vector3 fromPos = door.localPosition;
             Quaternion fromRot = door.localRotation;

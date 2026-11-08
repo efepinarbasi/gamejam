@@ -31,6 +31,8 @@ namespace Lacuna
         public float timeLimit = 120f;
         [Tooltip("Leave empty to use a placeholder capsule shape.")]
         public GameObject modelPrefab;
+        [Tooltip("This creature's own sounds. One is picked at random every 10 to 15 seconds while it is in the lab.")]
+        public AudioClip[] sounds;
     }
 
     /// <summary>
@@ -47,7 +49,7 @@ namespace Lacuna
 
         [Header("Rules")]
         [Tooltip("Total fails (timeout or failed QTE) before the Landlord kills you.")]
-        [SerializeField] private int maxFails = 2;
+        [SerializeField] private int maxFails = 3;
         [Tooltip("After a fail, the same creature is sent again. Off = move on to the next one.")]
         [SerializeField] private bool retrySameCreatureAfterFail = true;
         [SerializeField] private float startDelay = 1.5f;
@@ -63,6 +65,8 @@ namespace Lacuna
         [Header("Systems")]
         [SerializeField] private CreatureTransport transport;
         [SerializeField] private DialogueUI dialogue;
+        [Tooltip("Optional: music, creature sounds and the Landlord's voices.")]
+        [SerializeField] private LacunaAudio audioSystem;
 
         [Header("HUD (all optional)")]
         [SerializeField] private TMP_Text timerText;
@@ -72,9 +76,9 @@ namespace Lacuna
         [SerializeField] private GameObject endingPanel;
 
         [Header("Landlord lines ({name} becomes the creature's name)")]
-        [SerializeField, TextArea(1, 3)] private string retryLine = "{name} again. Do not disappoint me twice.";
+        [SerializeField, TextArea(1, 3)] private string retryLine = "{name} again. Do not disappoint me.";
         [SerializeField, TextArea(1, 3)] private string failLine = "{name} is gone. Do not let it happen again.";
-        [SerializeField, TextArea(1, 3)] private string gameOverLine = "Twice, now. Your family will be so disappointed in you.";
+        [SerializeField, TextArea(1, 3)] private string gameOverLine = "Three times, now. Your family will be so disappointed in you.";
         [SerializeField, TextArea(1, 3)]
         private string[] endingLines =
         {
@@ -159,6 +163,7 @@ namespace Lacuna
             UpdateHud();
             UpdateTimerText();
 
+            PlayMusicForFails(0);
             yield return new WaitForSeconds(startDelay);
 
             int index = 0;
@@ -183,11 +188,14 @@ namespace Lacuna
 
                 if (Fails >= maxFails)
                 {
+                    if (audioSystem != null) audioSystem.PlayGameOverMusic();
                     yield return GameOverRoutine(entry);
                     yield break;
                 }
 
-                yield return dialogue.Show(Format(failLine, entry));
+                // A new theme for every fail: the old one fades out, the new one fades in.
+                PlayMusicForFails(Fails);
+                yield return Say(Format(failLine, entry), false); // the shout already played
 
                 if (retrySameCreatureAfterFail)
                 {
@@ -216,7 +224,7 @@ namespace Lacuna
             // 1. The Landlord's message.
             SetState(GameState.Messaging);
             string line = isRetry ? retryLine : entry.introMessage;
-            yield return dialogue.Show(Format(line, entry));
+            yield return Say(Format(line, entry), true);
 
             // 2. The creature enters. Screens stay locked until it settles.
             SetState(GameState.CreatureEntering);
@@ -226,6 +234,7 @@ namespace Lacuna
 
             // 3. The timer starts and the three screens open one after another.
             timerRunning = true;
+            if (audioSystem != null) audioSystem.BeginAttempt(entry, transport.CurrentCreature);
 
             bool ok = false;
             yield return RunStage(sequencerScreen, GameState.Sequencer);
@@ -241,6 +250,7 @@ namespace Lacuna
             }
 
             timerRunning = false;
+            if (audioSystem != null) audioSystem.EndAttempt();
 
             // 4. Success: capsule + creature leave. Fail: the creature dies.
             if (ok)
@@ -252,6 +262,7 @@ namespace Lacuna
             else
             {
                 SetState(GameState.CreatureDying);
+                if (audioSystem != null) audioSystem.PlayFailShout();
                 FreezeAllStations();
                 yield return transport.KillCreature();
             }
@@ -273,15 +284,16 @@ namespace Lacuna
         private IEnumerator GameOverRoutine(CreatureEntry entry)
         {
             SetState(GameState.GameOver);
-            yield return dialogue.Show(Format(gameOverLine, entry));
+            yield return Say(Format(gameOverLine, entry), false); // the shout already played
             if (gameOverPanel != null) gameOverPanel.SetActive(true);
         }
 
         private IEnumerator EndingRoutine()
         {
             SetState(GameState.Ending);
+            if (audioSystem != null) audioSystem.PlayEndingMusic();
             foreach (string line in endingLines)
-                yield return dialogue.Show(line);
+                yield return Say(line, true);
             if (endingPanel != null) endingPanel.SetActive(true);
         }
 
@@ -364,6 +376,18 @@ namespace Lacuna
         private void UpdateHud()
         {
             if (failsText != null) failsText.text = "FAILS " + Fails + "/" + maxFails;
+        }
+
+        /// <summary>Shows a Landlord message, optionally with his speaking voice.</summary>
+        private IEnumerator Say(string text, bool withVoice)
+        {
+            if (withVoice && audioSystem != null) audioSystem.PlaySpeakingVoice();
+            yield return dialogue.Show(text);
+        }
+
+        private void PlayMusicForFails(int fails)
+        {
+            if (audioSystem != null) audioSystem.PlayMusicForFails(fails);
         }
 
         private static string Format(string text, CreatureEntry entry)
