@@ -120,7 +120,9 @@ namespace Lacuna
 
             if (statusText == null) return;
 
-            string line = stationName + "\n" + State.ToString().ToUpper();
+            string line = State == StationState.Locked
+                ? stationName + "\nNOT AVAILABLE"
+                : stationName + "\n" + State.ToString().ToUpper();
             if (useStubControls && State == StationState.Active)
                 line += "\n(stub) press " + stubKey + " to finish, Backspace to fail";
             statusText.text = line;

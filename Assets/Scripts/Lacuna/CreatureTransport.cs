@@ -76,6 +76,12 @@ namespace Lacuna
         [Tooltip("Size of the placeholder shape used when a creature has no model yet.")]
         [SerializeField] private Vector3 placeholderScale = new Vector3(0.25f, 0.25f, 0.25f);
         [SerializeField] private float deathShrinkTime = 0.7f;
+        [Tooltip("The creature turns to stare at the main camera (left and right only, it stays upright). This overrides the prefab's own rotation.")]
+        [SerializeField] private bool faceCamera = true;
+        [Tooltip("Turn the model if its front is not along its forward (Z) axis. For example 180 if it looks away from the camera.")]
+        [SerializeField] private float facingYawOffset = 0f;
+        [Tooltip("How fast it turns toward the camera, in degrees per second.")]
+        [SerializeField] private float faceCameraSpeed = 240f;
 
         [Header("Hooks for sound and VFX")]
         public UnityEvent onDoorOpening = new UnityEvent();
@@ -97,6 +103,7 @@ namespace Lacuna
         private Vector3 creatureJitter;
         private bool creatureRidesCapsule;
         private Vector3 creatureRideOffset;
+        private Camera mainCam;
 
         private Vector3 capsulePivotOffset; // capsule pivot minus the center of its body
         private Vector3 capsuleSize;        // size of the capsule's body after fitting
@@ -130,6 +137,8 @@ namespace Lacuna
                 CurrentCreature.transform.position = CurrentCapsule.transform.position + creatureRideOffset;
             else
                 CurrentCreature.transform.position = platform.TransformPoint(creatureLocalOffset) + creatureJitter;
+
+            FaceCamera(CurrentCreature.transform, false);
         }
 
         // ------------------------------------------------------------ public coroutines
@@ -213,6 +222,7 @@ namespace Lacuna
             creatureJitter = Vector3.zero;
             creatureRidesCapsule = false;
             go.transform.position = platform.TransformPoint(creatureLocalOffset);
+            FaceCamera(go.transform, true);
             CurrentCreature = go;
         }
 
@@ -236,6 +246,24 @@ namespace Lacuna
                 creatureJitter = Random.insideUnitSphere * 0.02f * (1f - k);
                 yield return null;
             }
+        }
+
+        /// <summary>Turns the creature around its up axis so it looks straight at the camera.</summary>
+        private void FaceCamera(Transform t, bool instant)
+        {
+            if (!faceCamera) return;
+
+            if (mainCam == null) mainCam = Camera.main;
+            if (mainCam == null) return;
+
+            Vector3 toCamera = mainCam.transform.position - t.position;
+            toCamera.y = 0f;
+            if (toCamera.sqrMagnitude < 0.0001f) return;
+
+            Quaternion target = Quaternion.LookRotation(toCamera) * Quaternion.Euler(0f, facingYawOffset, 0f);
+            t.rotation = instant
+                ? target
+                : Quaternion.RotateTowards(t.rotation, target, faceCameraSpeed * Time.deltaTime);
         }
 
         // ------------------------------------------------------------ capsule

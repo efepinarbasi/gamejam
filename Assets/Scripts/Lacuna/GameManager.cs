@@ -324,8 +324,9 @@ namespace Lacuna
                         || State == GameState.Capsule;
             if (!working) return false;
 
-            StationScreen screen = index == 0 ? sequencerScreen : index == 1 ? geneEditorScreen : capsuleScreen;
-            return screen != null && screen.State != StationState.Locked;
+            // Any screen can be visited during the work stages, even one that is still
+            // locked (it shows NOT AVAILABLE). Only the stub keys care about the order.
+            return index >= 0 && index <= 2;
         }
 
         /// <summary>For the Game Over panel's Retry button.</summary>

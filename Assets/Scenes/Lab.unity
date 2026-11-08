@@ -3993,6 +3993,9 @@ MonoBehaviour:
   creatureLocalOffset: {x: 0, y: 3.6, z: 0}
   placeholderScale: {x: 0.25, y: 0.25, z: 0.25}
   deathShrinkTime: 0.7
+  faceCamera: 1
+  facingYawOffset: 0
+  faceCameraSpeed: 240
   onDoorOpening:
     m_PersistentCalls:
       m_Calls: []
