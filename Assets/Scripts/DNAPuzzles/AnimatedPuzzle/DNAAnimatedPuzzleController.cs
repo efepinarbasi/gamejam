@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 namespace DNAPuzzle
 {
@@ -3941,19 +3940,25 @@ namespace DNAPuzzle
             var monitorObj = GameObject.Find("uzun monitör 1");
             if (monitorObj == null) return false;
 
-            // Unity's importer combines Plane.001 into submesh 1 of Plane and
-            // converts FBX centimetres to metres. Measure that imported surface.
             var mf = monitorObj.GetComponentInChildren<MeshFilter>(true);
-            if (mf == null || mf.sharedMesh == null || !mf.sharedMesh.isReadable
-                || mf.sharedMesh.subMeshCount < 2) return false;
-            var vertices = mf.sharedMesh.vertices;
-            var indices = mf.sharedMesh.GetTriangles(1);
-            if (indices.Length == 0) return false;
-            var faceBounds = new Bounds(vertices[indices[0]], Vector3.zero);
-            foreach (int index in indices) faceBounds.Encapsulate(vertices[index]);
-            var meshTransform = mf.transform;
-            var lo = faceBounds.min;
-            var hi = faceBounds.max;
+            Transform meshTransform = (mf != null) ? mf.transform : monitorObj.transform;
+
+            Vector3 hi = new Vector3(1.37455f, 0.95004f, -0.12421f);
+            Vector3 lo = new Vector3(-1.71277f, -0.95004f, -0.49281f);
+
+            if (mf != null && mf.sharedMesh != null && mf.sharedMesh.isReadable && mf.sharedMesh.subMeshCount >= 2)
+            {
+                var vertices = mf.sharedMesh.vertices;
+                var indices = mf.sharedMesh.GetTriangles(1);
+                if (indices != null && indices.Length > 0 && vertices != null && vertices.Length > 0)
+                {
+                    var faceBounds = new Bounds(vertices[indices[0]], Vector3.zero);
+                    foreach (int index in indices) faceBounds.Encapsulate(vertices[index]);
+                    lo = faceBounds.min;
+                    hi = faceBounds.max;
+                }
+            }
+
             Vector3 cTR = meshTransform.TransformPoint(new Vector3(hi.x, hi.y, hi.z));
             Vector3 cBR = meshTransform.TransformPoint(new Vector3(lo.x, hi.y, hi.z));
             Vector3 cTL = meshTransform.TransformPoint(new Vector3(hi.x, lo.y, hi.z));
@@ -3971,6 +3976,15 @@ namespace DNAPuzzle
 
             // Normal: Ekran yüzeyinden dışarıya (odaya/oyuncuya) bakan dik vektör
             Vector3 normal = Vector3.Cross(up, right).normalized;
+
+            Vector3 viewPos = (labStationController != null) ? labStationController.BasePosition
+                : (Camera.main != null ? Camera.main.transform.position : new Vector3(-4.94f, 4.94f, -4.33f));
+
+            if (Vector3.Dot(normal, viewPos - center) < 0f)
+            {
+                normal = -normal;
+                right = -right;
+            }
 
             Vector3 forward = -normal; // Unity Quad varsayılan olarak -Z'ye bakar, forward ekranın arkasına doğrudur
 
