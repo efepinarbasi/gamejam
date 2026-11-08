@@ -3536,8 +3536,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Lacuna.LacunaAudio
   musicByFails:
-  - {fileID: 8300000, guid: f5b07922ee950f648a40ef98b8eabc7a, type: 3}
   - {fileID: 8300000, guid: 43cfa7e5e53c2ff4fa2229f4ab84e49d, type: 3}
+  - {fileID: 8300000, guid: f5b07922ee950f648a40ef98b8eabc7a, type: 3}
   - {fileID: 8300000, guid: 5b487c332d3ee484fbb8d584fdf6638c, type: 3}
   endingMusic: {fileID: 0}
   gameOverMusic: {fileID: 0}
