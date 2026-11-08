@@ -3977,14 +3977,9 @@ namespace DNAPuzzle
             // Normal: Ekran yüzeyinden dışarıya (odaya/oyuncuya) bakan dik vektör
             Vector3 normal = Vector3.Cross(up, right).normalized;
 
-            Vector3 viewPos = (labStationController != null) ? labStationController.BasePosition
-                : (Camera.main != null ? Camera.main.transform.position : new Vector3(-4.94f, 4.94f, -4.33f));
-
-            if (Vector3.Dot(normal, viewPos - center) < 0f)
-            {
-                normal = -normal;
-                right = -right;
-            }
+            // The imported screen axes define its outward normal. BasePosition is
+            // not initialized if this runs before CameraStationController.Awake;
+            // choosing the face from it can flip the screen and dock behind it.
 
             Vector3 forward = -normal; // Unity Quad varsayılan olarak -Z'ye bakar, forward ekranın arkasına doğrudur
 
