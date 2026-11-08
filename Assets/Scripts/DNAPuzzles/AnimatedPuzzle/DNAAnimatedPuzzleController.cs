@@ -10,7 +10,7 @@ namespace DNAPuzzle
     /// taşmasız genişletilmiş genom parçaları, elektrikli nükleotid bağları ve 
     /// holo-organizma mutasyon kuluçkası içerir.
     /// </summary>
-    public class DNAAnimatedPuzzleController : MonoBehaviour
+    public partial class DNAAnimatedPuzzleController : MonoBehaviour
     {
         public static DNAAnimatedPuzzleController Instance { get; private set; }
 
@@ -52,8 +52,8 @@ namespace DNAPuzzle
         private string jigsawVictoryText = "";
 
         // Dokunmatik Tablet Çalışma Modu ve Ekran Boyutları
-        private enum TabletScreenMode { Home, Puzzle }
-        private TabletScreenMode tabletScreenMode = TabletScreenMode.Home;
+        private enum TabletScreenMode { Home, Puzzle, Sequencing }
+        private TabletScreenMode tabletScreenMode = TabletScreenMode.Sequencing;
 
         // Odadan (Base) masadaki fiziksel tablet ekranının Game View (Screen.width x Screen.height) içindeki tam oranları:
         // Canlı ekran görüntüsü kalibrasyonu: TopY = 385px (0.7184 * H), BottomY = 456px (Height = 0.1830 * H),
@@ -65,7 +65,7 @@ namespace DNAPuzzle
         private const float BaseTopRatio = 0.7258f;
 
         private RenderTexture tabletFrame;
-        private Material tabletProjection;
+        private Transform tabletGlass;
         private Material tabletScreenMaterial;
         // Inner glass edges measured in the docked Lab camera, in units of viewport height.
         private const float GlassTopWidth = 0.650f;
@@ -179,16 +179,27 @@ namespace DNAPuzzle
                 else if (st.gameObject.name == "ThirdScreen") chamberStation = st;
             }
 
-            // Sol uzun monitör (FirstScreen): Puzzle buradan tamamen kaldırıldı, sadece ortadaki tabletten açılır.
-            if (monitorStation != null)
+            if (stationCtrl != null && stationCtrl.loopStations != null)
             {
-                monitorStation.onEnter.RemoveListener(OnTerminalEnter);
-                monitorStation.onExit.RemoveListener(OnTerminalExit);
+                if (monitorStation == null && stationCtrl.loopStations.Length > 0) monitorStation = stationCtrl.loopStations[0];
+                if (tabletStation == null && stationCtrl.loopStations.Length > 1) tabletStation = stationCtrl.loopStations[1];
+                if (chamberStation == null && stationCtrl.loopStations.Length > 2) chamberStation = stationCtrl.loopStations[2];
             }
 
-            // Yalnızca ortadaki konsol/tablet (SecondScreen) DNA Puzzle tabletini açar
+            // DNA Puzzle artık soldaki klavyeli uzun monitörde (FirstScreen) çalışır.
+            // Ortadaki konsol/tablet (SecondScreen) puzzle'dan ayrılır ve orijinal haline döner.
             if (tabletStation != null)
             {
+                tabletStation.onEnter.RemoveListener(OnTerminalEnter);
+                tabletStation.onExit.RemoveListener(OnTerminalExit);
+            }
+            if (tabletStation != null) tabletStation.displaySurface = null;
+            tabletStation = monitorStation;
+
+            // Puzzle istasyonu (sol monitör) DNA Puzzle ekranını açar
+            if (tabletStation != null)
+            {
+                BuildTabletGlass();
                 tabletStation.onEnter.RemoveListener(OnTerminalEnter);
                 tabletStation.onEnter.AddListener(OnTerminalEnter);
                 tabletStation.onExit.RemoveListener(OnTerminalExit);
@@ -278,7 +289,7 @@ namespace DNAPuzzle
         {
             if (!isLabMode) return;
             isTerminalActive = true;
-            tabletScreenMode = TabletScreenMode.Home;
+            tabletScreenMode = TabletScreenMode.Sequencing;
             tabletOpenAnim = 0f;
             isTabletClosing = false;
             CameraStationController.IsInputIntercepted = () => true;
@@ -300,7 +311,7 @@ namespace DNAPuzzle
                 ExitRepairZoomMode();
             }
             CancelTabletDrag();
-            tabletScreenMode = TabletScreenMode.Home;
+            tabletScreenMode = TabletScreenMode.Sequencing;
             isTerminalActive = false;
             tabletOpenAnim = 0f;
             isTabletClosing = false;
@@ -669,7 +680,9 @@ namespace DNAPuzzle
 
             for (int i = transform.childCount - 1; i >= 0; i--)
             {
-                Destroy(transform.GetChild(i).gameObject);
+                var child = transform.GetChild(i);
+                if (child == tabletGlass) continue;
+                Destroy(child.gameObject);
             }
 
             puzzleRoot = new GameObject("PuzzleRoot");
@@ -2380,21 +2393,13 @@ namespace DNAPuzzle
         {
             if (isLabMode)
             {
-                // Eğer oyuncu masadaki tablet istasyonu (SecondScreen) DIŞINDA bir istasyona bakıyorsa
-                // (örneğin kuluçka camı 'ThirdScreen' veya sol monitör 'FirstScreen') veya o istasyona gidiyorsa,
-                // tablet arayüzü kesinlikle ekrana çizilmemelidir!
-                if (labStationController != null)
+                if (tabletGlass != null)
                 {
-                    if (labStationController.ActiveStation != null && labStationController.ActiveStation != tabletStation)
-                    {
-                        return;
-                    }
+                    bool interactive = isTerminalActive && labStationController != null
+                        && labStationController.CurrentState == CameraStationController.State.AtStation
+                        && labStationController.ActiveStation == tabletStation;
+                    RenderTabletScreen(interactive);
                 }
-
-                // Tablet ekranı hem odadayken hem de masadayken kesintisiz çizilir
-                GetTabletProjectionParams(out Rect tabletRect, out float ratio);
-                bool isInteractive = isTerminalActive && (labStationController == null || labStationController.CurrentState == CameraStationController.State.AtStation);
-                RenderTabletScreen(tabletRect, ratio, isInteractive);
                 return;
             }
 
@@ -3395,111 +3400,9 @@ namespace DNAPuzzle
         private static readonly Vector3 MonitorBottomWorld = new Vector3(-0.7177f, 2.2438f, -4.33f);
         private static readonly Vector3 MonitorCenterWorld = new Vector3(0.0427f, 2.5942f, -4.33f);
 
-        private static Vector3 ProjectPointToCamera(Vector3 worldPt, Vector3 camPos, Quaternion camRot, float fov, float aspect)
-        {
-            Vector3 local = Quaternion.Inverse(camRot) * (worldPt - camPos);
-            float z = Mathf.Max(0.05f, local.z);
-            float tanHalf = Mathf.Tan(fov * 0.5f * Mathf.Deg2Rad);
-            float vx = 0.5f + 0.5f * (local.x / (z * tanHalf * Mathf.Max(0.1f, aspect)));
-            float vy = 0.5f + 0.5f * (local.y / (z * tanHalf));
-            return new Vector3(vx, vy, 1f / z);
-        }
 
-        private void GetTabletProjectionParams(out Rect rect, out float ratio)
-        {
-            float h = Screen.height;
 
-            // Base konumunda (Odadan masaya bakarken) fiziksel tablet ekranının tam sınırları:
-            float baseCenterX = BaseCenterXRatio * Screen.width;
-            float baseTopY = BaseTopYRatio * h;
-            float baseHeight = BaseHeightRatio * h;
-            float baseBottomWidth = BaseBottomWidthRatio * h;
-            float baseTopWidth = baseBottomWidth * BaseTopRatio;
 
-            // Anchor2 konumunda (Tablete kilitliyken) tablet ekranı parametreleri:
-            float dockCenterX = 0.5000f * Screen.width;
-            float dockTopY = 0.2390f * h;
-            float dockHeight = 0.5940f * h;
-            float dockBottomWidth = GlassBottomWidth * h; // 0.940f * h
-            float dockTopWidth = GlassTopWidth * h;       // 0.650f * h
-
-            if (labStationController != null)
-            {
-                if (labStationController.CurrentState == CameraStationController.State.AtBase || labStationController.ActiveStation != tabletStation)
-                {
-                    rect = new Rect(baseCenterX - baseBottomWidth * 0.5f, baseTopY, baseBottomWidth, baseHeight);
-                    ratio = baseTopWidth / Mathf.Max(0.01f, baseBottomWidth);
-                    return;
-                }
-                if (labStationController.CurrentState == CameraStationController.State.AtStation && labStationController.ActiveStation == tabletStation)
-                {
-                    rect = new Rect(dockCenterX - dockBottomWidth * 0.5f, dockTopY, dockBottomWidth, dockHeight);
-                    ratio = dockTopWidth / Mathf.Max(0.01f, dockBottomWidth);
-                    return;
-                }
-
-                // Kamera hareket halindeyken (State.Moving): 3B monitörün dünya koordinatlarını anlık kamera matrisiyle izdüşür
-                Camera cam = labStationController.cam != null ? labStationController.cam : Camera.main;
-                if (cam != null && tabletStation != null && tabletStation.cameraAnchor != null)
-                {
-                    float aspect = (float)Screen.width / Mathf.Max(1f, h);
-                    Vector3 basePos = labStationController.BasePosition;
-                    Quaternion baseRot = labStationController.BaseRotation;
-                    float baseFov = labStationController.BaseFov > 1f ? labStationController.BaseFov : cam.fieldOfView;
-
-                    Vector3 dockPos = tabletStation.cameraAnchor.position;
-                    Quaternion dockRot = tabletStation.cameraAnchor.rotation;
-                    float dockFov = tabletStation.OverrideFov ? tabletStation.fieldOfView : baseFov;
-
-                    Vector3 top0 = ProjectPointToCamera(MonitorTopWorld, basePos, baseRot, baseFov, aspect);
-                    Vector3 top1 = ProjectPointToCamera(MonitorTopWorld, dockPos, dockRot, dockFov, aspect);
-                    Vector3 topNow = ProjectPointToCamera(MonitorTopWorld, cam.transform.position, cam.transform.rotation, cam.fieldOfView, aspect);
-
-                    Vector3 bot0 = ProjectPointToCamera(MonitorBottomWorld, basePos, baseRot, baseFov, aspect);
-                    Vector3 bot1 = ProjectPointToCamera(MonitorBottomWorld, dockPos, dockRot, dockFov, aspect);
-                    Vector3 botNow = ProjectPointToCamera(MonitorBottomWorld, cam.transform.position, cam.transform.rotation, cam.fieldOfView, aspect);
-
-                    Vector3 cen0 = ProjectPointToCamera(MonitorCenterWorld, basePos, baseRot, baseFov, aspect);
-                    Vector3 cen1 = ProjectPointToCamera(MonitorCenterWorld, dockPos, dockRot, dockFov, aspect);
-                    Vector3 cenNow = ProjectPointToCamera(MonitorCenterWorld, cam.transform.position, cam.transform.rotation, cam.fieldOfView, aspect);
-
-                    float tTopW = Mathf.Clamp01((topNow.z - top0.z) / Mathf.Max(0.0001f, top1.z - top0.z));
-                    float tBotW = Mathf.Clamp01((botNow.z - bot0.z) / Mathf.Max(0.0001f, bot1.z - bot0.z));
-
-                    float errTop0 = BaseTopYRatio - (1f - top0.y);
-                    float errTop1 = 0.2390f - (1f - top1.y);
-                    float errBot0 = (BaseTopYRatio + BaseHeightRatio) - (1f - bot0.y);
-                    float errBot1 = (0.2390f + 0.5940f) - (1f - bot1.y);
-
-                    float topYNorm = (1f - topNow.y) + Mathf.Lerp(errTop0, errTop1, tTopW);
-                    float botYNorm = (1f - botNow.y) + Mathf.Lerp(errBot0, errBot1, tBotW);
-
-                    float errCenX0 = BaseCenterXRatio - cen0.x;
-                    float errCenX1 = 0.5000f - cen1.x;
-                    float centerXNorm = cenNow.x + Mathf.Lerp(errCenX0, errCenX1, tBotW);
-
-                    float curCenterX = centerXNorm * Screen.width;
-                    float curTopY = topYNorm * h;
-                    float curHeight = Mathf.Max(10f, (botYNorm - topYNorm) * h);
-                    float curTopWidth = Mathf.Lerp(baseTopWidth, dockTopWidth, tTopW);
-                    float curBottomWidth = Mathf.Lerp(baseBottomWidth, dockBottomWidth, tBotW);
-
-                    rect = new Rect(curCenterX - curBottomWidth * 0.5f, curTopY, curBottomWidth, curHeight);
-                    ratio = curTopWidth / Mathf.Max(0.01f, curBottomWidth);
-                    return;
-                }
-            }
-
-            float fallbackT = isTerminalActive ? 1f : 0f;
-            float centerX = Mathf.Lerp(baseCenterX, dockCenterX, fallbackT);
-            float topY = Mathf.Lerp(baseTopY, dockTopY, fallbackT);
-            float height = Mathf.Lerp(baseHeight, dockHeight, fallbackT);
-            float bottomWidth = Mathf.Lerp(baseBottomWidth, dockBottomWidth, fallbackT);
-            float topWidth = Mathf.Lerp(baseTopWidth, dockTopWidth, fallbackT);
-
-            rect = new Rect(centerX - bottomWidth * 0.5f, topY, bottomWidth, height);
-            ratio = topWidth / Mathf.Max(0.01f, bottomWidth);
-        }
 
         private void ApplyTextureToTabletMesh()
         {
@@ -3983,6 +3886,7 @@ namespace DNAPuzzle
 
         private void AnswerTabletGap(LacunaShape answer)
         {
+            if (tabletScreenMode == TabletScreenMode.Sequencing) { AnswerOpeningGap(answer); return; }
             if (!NextTabletGap(out var strand, out int index, out var slot)) return;
             if (index < 0) return;
 
@@ -4025,53 +3929,109 @@ namespace DNAPuzzle
             }
         }
 
-        private void RenderTabletScreen(Rect tabletRect, float ratio, bool isInteractive)
+        private void BuildTabletGlass()
+        {
+            if (tabletGlass != null) return;
+            if (!TryBuildMonitorGlass())
+                Debug.LogError("[DNA Puzzle] Sol monitörün ekran mesh'i bulunamadı. Ekran oluşturulamadı.");
+        }
+
+        private bool TryBuildMonitorGlass()
+        {
+            var monitorObj = GameObject.Find("uzun monitör 1");
+            if (monitorObj == null) return false;
+
+            // Unity's importer combines Plane.001 into submesh 1 of Plane and
+            // converts FBX centimetres to metres. Measure that imported surface.
+            var mf = monitorObj.GetComponentInChildren<MeshFilter>(true);
+            if (mf == null || mf.sharedMesh == null || !mf.sharedMesh.isReadable
+                || mf.sharedMesh.subMeshCount < 2) return false;
+            var vertices = mf.sharedMesh.vertices;
+            var indices = mf.sharedMesh.GetTriangles(1);
+            if (indices.Length == 0) return false;
+            var faceBounds = new Bounds(vertices[indices[0]], Vector3.zero);
+            foreach (int index in indices) faceBounds.Encapsulate(vertices[index]);
+            var meshTransform = mf.transform;
+            var lo = faceBounds.min;
+            var hi = faceBounds.max;
+            Vector3 cTR = meshTransform.TransformPoint(new Vector3(hi.x, hi.y, hi.z));
+            Vector3 cBR = meshTransform.TransformPoint(new Vector3(lo.x, hi.y, hi.z));
+            Vector3 cTL = meshTransform.TransformPoint(new Vector3(hi.x, lo.y, hi.z));
+            Vector3 cBL = meshTransform.TransformPoint(new Vector3(lo.x, lo.y, hi.z));
+
+            Vector3 center = (cTR + cBR + cBL + cTL) * 0.25f;
+
+            Vector3 up = ((cTR - cBR) + (cTL - cBL)) * 0.5f;
+            float height = up.magnitude;
+            up.Normalize();
+
+            Vector3 right = ((cTR - cTL) + (cBR - cBL)) * 0.5f;
+            float width = right.magnitude;
+            right.Normalize();
+
+            // Normal: Ekran yüzeyinden dışarıya (odaya/oyuncuya) bakan dik vektör
+            Vector3 normal = Vector3.Cross(up, right).normalized;
+
+            Vector3 forward = -normal; // Unity Quad varsayılan olarak -Z'ye bakar, forward ekranın arkasına doğrudur
+
+            // Ekran kavisli olduğundan ve bezellerin arkasında kalmaması için
+            // camı normal yönünde 1.2 cm öne alıyoruz:
+            center += normal * 0.012f;
+
+            // Bezel içine tam oturması için %97 genişlik, %96 yükseklik (ekranı boşluksuz doldurur)
+            float screenW = width * 0.97f;
+            float screenH = height * 0.96f;
+
+            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.name = "DNA Monitor Glass";
+            quad.GetComponent<Collider>().enabled = false;
+            tabletGlass = quad.transform;
+            tabletGlass.SetPositionAndRotation(center, Quaternion.LookRotation(forward, up));
+            tabletGlass.localScale = new Vector3(screenW, screenH, 1f);
+            // Non-uniform parent scale kaynaklı bükülmeyi (diagonal line) önlemek için ölçeği (1,1,1) olan kök transform altına bağlanır:
+            tabletGlass.SetParent(transform, true);
+
+            tabletFrame = new RenderTexture(920, 540, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            Shader unlit = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Texture");
+            tabletScreenMaterial = new Material(unlit);
+            tabletScreenMaterial.mainTexture = tabletFrame;
+            tabletScreenMaterial.renderQueue = 3000;
+            tabletScreenMaterial.SetInt("_Cull", 0); // Çift taraflı çizim
+
+            var glassRenderer = quad.GetComponent<Renderer>();
+            glassRenderer.sharedMaterial = tabletScreenMaterial;
+            glassRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            glassRenderer.receiveShadows = false;
+
+            if (tabletStation != null) tabletStation.displaySurface = tabletGlass;
+            Debug.Log($"[DNA Puzzle] Monitor glass built successfully: size={screenW:F2}x{screenH:F2}m at {center}, normal={normal}");
+            return true;
+        }
+
+        private void RenderTabletScreen(bool isInteractive)
         {
             if (jigsawStrands == null || jigsawStrands.Count != tabletSlots.Length)
                 EnsureJigsawLoaded(currentJigsawCreature);
 
-            // Eğer interaktif değilse: Odadayken masadaki tablete tıklandıysa tablete kilitlen ve yaklaş!
-            if (!isInteractive)
-            {
-                if (Event.current.type == EventType.MouseDown && Event.current.button == 0)
-                {
-                    if (tabletRect.Contains(Event.current.mousePosition))
-                    {
-                        if (labStationController != null && tabletStation != null && labStationController.CurrentState == CameraStationController.State.AtBase)
-                        {
-                            audioManager?.PlayClick();
-                            labStationController.GoToStation(tabletStation);
-                            Event.current.Use();
-                            return;
-                        }
-                    }
-                }
-
-                if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
-                {
-                    return;
-                }
-            }
-
             const float width = 920, height = 540;
             bool repaint = Event.current.type == EventType.Repaint;
-            if (tabletFrame == null)
-            {
-                tabletFrame = new RenderTexture((int)width, (int)height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear) { name = "Tablet UI" };
-                tabletProjection = new Material(Resources.Load<Shader>("TabletProjection"));
-            }
-
+            if (!isInteractive && !repaint && Event.current.type != EventType.Layout) return;
             var previousTarget = RenderTexture.active;
             var previousMouse = Event.current.mousePosition;
-
             if (isInteractive)
             {
-                float y = (previousMouse.y - tabletRect.y) / tabletRect.height;
-                float rowWidth = Mathf.LerpUnclamped(ratio, 1, y);
-                float u = .5f + (previousMouse.x - tabletRect.center.x) / (tabletRect.width * Mathf.Max(.01f, rowWidth));
-                Event.current.mousePosition = new Vector2(width * u, height * y / Mathf.Max(.01f, rowWidth));
+                var cam = (labStationController != null && labStationController.cam != null) ? labStationController.cam : Camera.main;
+                if (cam != null && tabletGlass != null)
+                {
+                    var ray = cam.ScreenPointToRay(new Vector2(previousMouse.x, cam.pixelHeight - previousMouse.y));
+                    var plane = new Plane(tabletGlass.forward, tabletGlass.position);
+                    if (plane.Raycast(ray, out float distance))
+                    {
+                        var local = tabletGlass.InverseTransformPoint(ray.GetPoint(distance));
+                        Event.current.mousePosition = new Vector2((local.x + .5f) * width, (.5f - local.y) * height);
+                    }
+                }
             }
-
             if (repaint)
             {
                 RenderTexture.active = tabletFrame;
@@ -4082,7 +4042,11 @@ namespace DNAPuzzle
             try
             {
                 // Odadayken veya Ana Ekran modundayken daima Ana Ekranı göster
-                if (!isInteractive || tabletScreenMode == TabletScreenMode.Home)
+                if (tabletScreenMode == TabletScreenMode.Sequencing)
+                {
+                    DrawOpeningSequence(isInteractive);
+                }
+                else if (!isInteractive || tabletScreenMode == TabletScreenMode.Home)
                 {
                     DrawTabletHomeScreen(width, height);
                 }
@@ -4105,11 +4069,15 @@ namespace DNAPuzzle
                     RenderTexture.active = previousTarget;
                 }
             }
-            if (repaint)
+
+            // In the docked view the camera faces the glass squarely. Composite the
+            // same frame above room effects using the actual projected glass corners.
+            if (repaint && isInteractive)
             {
-                ApplyTextureToTabletMesh();
-                tabletProjection.SetFloat("_TopRatio", ratio);
-                Graphics.DrawTexture(tabletRect, tabletFrame, tabletProjection);
+                var cam = labStationController.cam;
+                var tl = cam.WorldToScreenPoint(tabletGlass.TransformPoint(new Vector3(-.5f, .5f)));
+                var br = cam.WorldToScreenPoint(tabletGlass.TransformPoint(new Vector3(.5f, -.5f)));
+                GUI.DrawTexture(Rect.MinMaxRect(tl.x, cam.pixelHeight - tl.y, br.x, cam.pixelHeight - br.y), tabletFrame);
             }
         }
 
@@ -4123,7 +4091,7 @@ namespace DNAPuzzle
             Color accent = new Color(0.39f, 0.91f, 0.83f);
 
             // 1. Üst Bar: Sistem Başlığı & Odaya Dönüş Butonu
-            GUI.Label(new Rect(32, 16, 460, 36), "LACUNA GENETICS // ANALİZ TABLETİ", EditorBold(22));
+            GUI.Label(new Rect(32, 16, 460, 36), "LACUNA GENETICS // DNA TERMİNALİ", EditorBold(22));
             GUI.Label(new Rect(34, 52, 460, 22), "HÜCRESEL BİYO-BÜTÜNLÜK & DNA ONARIM MODÜLÜ v2.4", EditorLabel(13));
 
             if (TabletButton(new Rect(770, 18, 118, 42), "Odaya dön", panel, 15))
@@ -4234,7 +4202,7 @@ namespace DNAPuzzle
 
             // 5. En Alt Bilgi Çubuğu
             int totalCount = roster.Count;
-            GUI.Label(new Rect(32, 485, 856, 26), $"LACUNA DATABASE // Toplam {totalCount} canlı kataloğu yüklendi  •  İstasyon 2 (Masaüstü Tablet)", CenteredLabel(11));
+            GUI.Label(new Rect(32, 485, 856, 26), $"LACUNA DATABASE // Toplam {totalCount} canlı kataloğu yüklendi  •  İstasyon 1 (Sol Monitör)", CenteredLabel(11));
         }
 
         private void DrawTabletBoard()
@@ -4527,7 +4495,8 @@ namespace DNAPuzzle
         private void OnDestroy()
         {
             if (tabletFrame != null) { tabletFrame.Release(); Destroy(tabletFrame); }
-            if (tabletProjection != null) Destroy(tabletProjection);
+            if (tabletGlass != null) Destroy(tabletGlass.gameObject);
+            if (tabletScreenMaterial != null) Destroy(tabletScreenMaterial);
             if (helixRibbons != null) Destroy(helixRibbons);
         }
 
@@ -4543,7 +4512,7 @@ namespace DNAPuzzle
             var dropArea = Rect.MinMaxRect(socket.xMin - 11, socket.yMin - 6, socket.xMax + 11, socket.yMax + 6);
             string instruction = string.IsNullOrEmpty(jigsawMessage)
                 ? "Bir parçayı tut ve soru işaretli yuvaya bırak." : jigsawMessage;
-            GUI.Label(new Rect(32, 352, 856, 32), instruction, CenteredBold(17));
+            GUI.Label(new Rect(32, 344, 856, 32), instruction, CenteredBold(17));
 
             for (int i = 0; i < tabletBases.Length; i++)
             {
@@ -4569,7 +4538,6 @@ namespace DNAPuzzle
                 Rect renderRect = tray;
                 if (hover && !lifted && pieceMotion == TabletPieceMotion.Idle)
                 {
-                    // Tepsi parçasının fareyle üzerine gelindiğinde hafif yükselmesi (hover lift)
                     renderRect.y -= 4f;
                     renderRect.height += 4f;
                 }
@@ -4588,7 +4556,6 @@ namespace DNAPuzzle
                     return;
                 }
 
-                // Parça merkezi her zaman farenin tutma ofsetinde birebir sabit kalır (titreme veya kayma olmaz)
                 if (input.type == EventType.MouseDrag || input.type == EventType.MouseUp)
                     pieceCenter = input.mousePosition + grabOffset;
 
@@ -4633,7 +4600,6 @@ namespace DNAPuzzle
                     return;
                 }
             }
-            // Taşınan parçanın altına yarı saydam yumuşak gölge
             DrawSolidRect(new Rect(pieceCenter.x - size.x * 0.5f + 4f, pieceCenter.y - size.y * 0.5f + 6f, size.x, size.y), new Color(0f, 0f, 0f, 0.35f));
             Rect floating = new Rect(pieceCenter - size * 0.5f, size);
             DrawMovingBase(floating, piece, top, false, true, Mathf.RoundToInt(size.y * 0.31f));

@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Events;
 
 /// <summary>
@@ -11,6 +11,7 @@ public class ScreenStation : MonoBehaviour
     [Header("Kamera")]
     [Tooltip("Kameranın duracağı nokta. Scene'de boş bir obje oluşturup ekrana bakacak şekilde konumlandır.")]
     public Transform cameraAnchor;
+    [System.NonSerialized] public Transform displaySurface;
     public float moveDuration = 0.8f;
     public bool OverrideFov = false;
     public float fieldOfView = 40f;
@@ -21,9 +22,9 @@ public class ScreenStation : MonoBehaviour
 
     [Header("Olaylar")]
     [Tooltip("Kamera ekrana vardığında (2D UI'ı burada aç).")]
-    public UnityEvent onEnter;
+    public UnityEvent onEnter = new UnityEvent();
     [Tooltip("Base'e dönüş başladığında (2D UI'ı burada kapat).")]
-    public UnityEvent onExit;
+    public UnityEvent onExit = new UnityEvent();
 
     Collider _col;
 

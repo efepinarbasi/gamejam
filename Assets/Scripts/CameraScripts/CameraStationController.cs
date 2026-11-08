@@ -34,6 +34,8 @@ public class CameraStationController : MonoBehaviour
 
     public State CurrentState { get; private set; } = State.AtBase;
     public ScreenStation ActiveStation { get; private set; }
+    public ScreenStation TargetStation { get; private set; }
+    public ScreenStation LeavingStation { get; private set; }
     public float MoveProgress { get; private set; } = 0f;
 
     public static CameraStationController Instance { get; private set; }
@@ -45,6 +47,16 @@ public class CameraStationController : MonoBehaviour
         {
             if (CurrentState != State.AtStation || ActiveStation == null || loopStations == null) return -1;
             return System.Array.IndexOf(loopStations, ActiveStation);
+        }
+    }
+
+    /// <summary>Kamera şu an hangi oyun ekranına hareket ediyor? -1 = hiçbiri.</summary>
+    public int TargetLoopIndex
+    {
+        get
+        {
+            if (TargetStation == null || loopStations == null) return -1;
+            return System.Array.IndexOf(loopStations, TargetStation);
         }
     }
 
@@ -149,9 +161,20 @@ public class CameraStationController : MonoBehaviour
         if (CurrentState == State.Moving) return;
         var leaving = ActiveStation;
         SetHovered(null);
-        ActiveStation = station;
-        StartMove(station.cameraAnchor.position, station.cameraAnchor.rotation,
-                  station.OverrideFov ? station.fieldOfView : _baseFov,
+        TargetStation = station;
+        var position = station.cameraAnchor.position;
+        var rotation = station.cameraAnchor.rotation;
+        float fov = station.OverrideFov ? station.fieldOfView : _baseFov;
+        if (station.displaySurface != null)
+        {
+            var glass = station.displaySurface;
+            float height = glass.TransformVector(Vector3.up).magnitude;
+            float width = glass.TransformVector(Vector3.right).magnitude;
+            float distance = Mathf.Max(height, width / cam.aspect) / (1.80f * Mathf.Tan(fov * Mathf.Deg2Rad * .5f));
+            rotation = glass.rotation;
+            position = glass.position - glass.forward * distance;
+        }
+        StartMove(position, rotation, fov,
                   station.moveDuration, State.AtStation, station, leaving);
         station.SetInteractable(false); // istasyondayken collider tıklamayı engellemesin
     }
@@ -160,6 +183,7 @@ public class CameraStationController : MonoBehaviour
     {
         if (CurrentState != State.AtStation) return;
         var leaving = ActiveStation;
+        TargetStation = null;
         StartMove(_basePos, _baseRot, _baseFov, returnDuration, State.AtBase, null, leaving);
     }
 
@@ -168,6 +192,7 @@ public class CameraStationController : MonoBehaviour
     void StartMove(Vector3 pos, Quaternion rot, float fov, float duration,
                    State endState, ScreenStation arrived, ScreenStation left = null)
     {
+        LeavingStation = left;
         if (_moveRoutine != null) StopCoroutine(_moveRoutine);
         _moveRoutine = StartCoroutine(MoveRoutine(pos, rot, fov, duration, endState, arrived, left));
     }
@@ -210,6 +235,9 @@ public class CameraStationController : MonoBehaviour
 
         if (arrived != null)
         {
+            ActiveStation = arrived;
+            TargetStation = null;
+            LeavingStation = null;
             arrived.NotifyEnter();
             if (left != null && left != arrived) left.SetInteractable(true);
         }
@@ -217,6 +245,8 @@ public class CameraStationController : MonoBehaviour
         {
             if (left != null) left.SetInteractable(true);
             ActiveStation = null;
+            TargetStation = null;
+            LeavingStation = null;
         }
         _moveRoutine = null;
     }
