@@ -75,7 +75,8 @@ namespace Lacuna
         [SerializeField, TextArea(1, 3)] private string retryLine = "{name} again. Do not disappoint me twice.";
         [SerializeField, TextArea(1, 3)] private string failLine = "{name} is gone. Do not let it happen again.";
         [SerializeField, TextArea(1, 3)] private string gameOverLine = "Twice, now. Your family will be so disappointed in you.";
-        [SerializeField, TextArea(1, 3)] private string[] endingLines =
+        [SerializeField, TextArea(1, 3)]
+        private string[] endingLines =
         {
             "Every creature, mended. I did not think it possible.",
             "They are yours now. All of them.",
@@ -313,9 +314,16 @@ namespace Lacuna
         /// <summary>
         /// Your camera script should ask this before moving to a screen.
         /// index: 0 = left (sequencer), 1 = center (gene editor), 2 = right (capsule).
+        /// Screens only work during the three work stages, so this is false while the
+        /// Landlord talks, the creature enters, leaves or dies.
         /// </summary>
         public bool CanVisitScreen(int index)
         {
+            bool working = State == GameState.Sequencer
+                        || State == GameState.GeneEditor
+                        || State == GameState.Capsule;
+            if (!working) return false;
+
             StationScreen screen = index == 0 ? sequencerScreen : index == 1 ? geneEditorScreen : capsuleScreen;
             return screen != null && screen.State != StationState.Locked;
         }

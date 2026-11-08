@@ -40,9 +40,22 @@ namespace Lacuna
         protected virtual void Update()
         {
             if (!useStubControls || State != StationState.Active) return;
+            if (!PlayerIsAtThisScreen()) return;
 
             if (GameInput.NumberPressed(stubKey)) Complete();
             else if (GameInput.BackspacePressed()) Fail();
+        }
+
+        /// <summary>
+        /// Stub keys only count while the camera is at this screen (screen number = stub key:
+        /// 1 = left, 2 = center, 3 = right). Without a camera controller, or when its
+        /// Loop Stations list is empty, they count from anywhere.
+        /// </summary>
+        private bool PlayerIsAtThisScreen()
+        {
+            CameraStationController cam = CameraStationController.Instance;
+            if (cam == null || !cam.HasLoopStations) return true;
+            return cam.CurrentLoopIndex == stubKey - 1;
         }
 
         // ---- called by GameManager ----

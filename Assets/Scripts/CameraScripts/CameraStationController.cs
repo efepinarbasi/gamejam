@@ -23,6 +23,10 @@ public class CameraStationController : MonoBehaviour
     public LayerMask stationMask = ~0;
     public float maxRayDistance = 50f;
 
+    [Header("Lacuna oyun döngüsü")]
+    [Tooltip("Sırayla: 0 = sol ekran (sequencer), 1 = orta ekran (gen editörü), 2 = sağ ekran (kapsül). Boş bırakırsan tüm istasyonlar hep açık olur.")]
+    public ScreenStation[] loopStations = new ScreenStation[3];
+
     [Header("Geçiş")]
     public AnimationCurve ease = AnimationCurve.EaseInOut(0, 0, 1, 1);
     [Tooltip("Base'e dönüş süresi")]
@@ -31,6 +35,30 @@ public class CameraStationController : MonoBehaviour
     public State CurrentState { get; private set; } = State.AtBase;
     public ScreenStation ActiveStation { get; private set; }
     public float MoveProgress { get; private set; } = 0f;
+
+    public static CameraStationController Instance { get; private set; }
+
+    /// <summary>Kamera şu an hangi oyun ekranının başında? 0 = sol, 1 = orta, 2 = sağ, -1 = hiçbiri.</summary>
+    public int CurrentLoopIndex
+    {
+        get
+        {
+            if (CurrentState != State.AtStation || ActiveStation == null || loopStations == null) return -1;
+            return System.Array.IndexOf(loopStations, ActiveStation);
+        }
+    }
+
+    /// <summary>Loop Stations listesinde en az bir istasyon atanmış mı?</summary>
+    public bool HasLoopStations
+    {
+        get
+        {
+            if (loopStations == null) return false;
+            foreach (var s in loopStations)
+                if (s != null) return true;
+            return false;
+        }
+    }
     public Vector3 BasePosition => _basePos;
     public Quaternion BaseRotation => _baseRot;
     public float BaseFov => _baseFov;
@@ -48,6 +76,7 @@ public class CameraStationController : MonoBehaviour
 
     void Awake()
     {
+        Instance = this;
         if (cam == null) cam = GetComponent<Camera>() != null ? GetComponent<Camera>() : Camera.main;
         if (cam == null) return;
 
@@ -63,6 +92,11 @@ public class CameraStationController : MonoBehaviour
             _baseRot = cam.transform.rotation;
         }
         _baseFov = cam.fieldOfView;
+    }
+
+    void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 
     void Start()
@@ -85,6 +119,12 @@ public class CameraStationController : MonoBehaviour
                 break;
 
             case State.AtStation:
+                // Oyun bu ekranı kilitlediyse (süre doldu, yaratık gitti veya öldü) Base'e dön
+                if (!IsStationAvailable(ActiveStation))
+                {
+                    ReturnToBase();
+                    break;
+                }
                 if (BackPressed())
                 {
                     if (IsInputIntercepted != null && IsInputIntercepted())
@@ -105,6 +145,7 @@ public class CameraStationController : MonoBehaviour
     public void GoToStation(ScreenStation station)
     {
         if (station == null || station.cameraAnchor == null) return;
+        if (!IsStationAvailable(station)) return;
         if (CurrentState == State.Moving) return;
         var leaving = ActiveStation;
         SetHovered(null);
@@ -180,6 +221,24 @@ public class CameraStationController : MonoBehaviour
         _moveRoutine = null;
     }
 
+    // ---------- Lacuna: ekran kilidi ----------
+
+    /// <summary>
+    /// Bu istasyona şu an girilebilir mi? Sahnede GameManager yoksa veya istasyon
+    /// loopStations listesinde değilse her zaman true döner.
+    /// </summary>
+    bool IsStationAvailable(ScreenStation station)
+    {
+        if (station == null) return false;
+
+        var gm = Lacuna.GameManager.Instance;
+        if (gm == null || loopStations == null) return true;
+
+        int index = System.Array.IndexOf(loopStations, station);
+        if (index < 0 || index > 2) return true;
+        return gm.CanVisitScreen(index);
+    }
+
     // ---------- Hover ----------
 
     void UpdateHover()
@@ -195,6 +254,7 @@ public class CameraStationController : MonoBehaviour
         ScreenStation hit = null;
         if (Physics.Raycast(ray, out RaycastHit info, maxRayDistance, stationMask, QueryTriggerInteraction.Collide))
             hit = info.collider.GetComponentInParent<ScreenStation>();
+        if (hit != null && !IsStationAvailable(hit)) hit = null; // kilitli ekran vurgulanmaz, tıklanmaz
         SetHovered(hit);
     }
 
