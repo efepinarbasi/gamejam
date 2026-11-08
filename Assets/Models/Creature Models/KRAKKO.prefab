@@ -43,6 +43,7 @@ GameObject:
   - component: {fileID: 5093086693011402619}
   - component: {fileID: 6309031705616728662}
   - component: {fileID: 7878601780731661621}
+  - component: {fileID: 6447220408565893050}
   m_Layer: 0
   m_Name: Sphere
   m_TagString: Untagged
@@ -123,6 +124,22 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &6447220408565893050
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 254436255141488863}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5f1d45b5123680d46bfd8763425a85da, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Lacuna.EyeLookAtCamera
+  targetCamera: {fileID: 0}
+  rotationOffsetEuler: {x: 0, y: 0, z: 0}
+  turnSpeed: 360
+  maxTurnAngle: 80
 --- !u!1 &1556781866442672332
 GameObject:
   m_ObjectHideFlags: 0
@@ -134,6 +151,7 @@ GameObject:
   - component: {fileID: 2326434041181305526}
   - component: {fileID: 8809908687167611242}
   - component: {fileID: 4889722900076868245}
+  - component: {fileID: 6016078651760394545}
   m_Layer: 0
   m_Name: Sphere.001
   m_TagString: Untagged
@@ -214,6 +232,22 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &6016078651760394545
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1556781866442672332}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5f1d45b5123680d46bfd8763425a85da, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Lacuna.EyeLookAtCamera
+  targetCamera: {fileID: 0}
+  rotationOffsetEuler: {x: 0, y: 0, z: 0}
+  turnSpeed: 360
+  maxTurnAngle: 80
 --- !u!1 &2002990222817589761
 GameObject:
   m_ObjectHideFlags: 0
@@ -275,7 +309,7 @@ Transform:
   m_GameObject: {fileID: 3399389325722117011}
   serializedVersion: 2
   m_LocalRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071067}
-  m_LocalPosition: {x: 6.34734, y: 0.22016999, z: -3.8826702}
+  m_LocalPosition: {x: 6.34734, y: 0.5, z: -3.8826702}
   m_LocalScale: {x: 100, y: 100, z: 100}
   m_ConstrainProportionsScale: 0
   m_Children: []

@@ -43,6 +43,7 @@ GameObject:
   - component: {fileID: 772929413525326027}
   - component: {fileID: 7178790036388008613}
   - component: {fileID: 1261103891651044133}
+  - component: {fileID: 6211202619256092227}
   m_Layer: 0
   m_Name: Sphere
   m_TagString: Untagged
@@ -123,6 +124,22 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &6211202619256092227
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7407170391506678578}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5f1d45b5123680d46bfd8763425a85da, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Lacuna.EyeLookAtCamera
+  targetCamera: {fileID: 0}
+  rotationOffsetEuler: {x: 0, y: 0, z: 0}
+  turnSpeed: 360
+  maxTurnAngle: 80
 --- !u!1 &7834716864354825945
 GameObject:
   m_ObjectHideFlags: 0
